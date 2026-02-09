@@ -22,13 +22,13 @@ Intelligent PDF parser with font-aware structure detection, table extraction, an
 ## Installation
 
 ```bash
-pip install pdfstruct
+pip install pdfstructx
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/kyros-groupe/pdfstruct.git
+git clone https://github.com/Kyros-Groupe-Ltd/pdfstruct.git
 cd pdfstruct
 pip install -e .
 ```

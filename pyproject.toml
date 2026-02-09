@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdfstructx"
-version = "0.2.0"
+version = "0.2.1"
 description = "Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support"
 readme = "README.md"
 license = {file = "LICENSE"}
@@ -37,9 +37,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/kyros-groupe/pdfstruct"
-Documentation = "https://github.com/kyros-groupe/pdfstruct#readme"
-Issues = "https://github.com/kyros-groupe/pdfstruct/issues"
+Homepage = "https://github.com/Kyros-Groupe-Ltd/pdfstruct"
+Documentation = "https://github.com/Kyros-Groupe-Ltd/pdfstruct#readme"
+Issues = "https://github.com/Kyros-Groupe-Ltd/pdfstruct/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
