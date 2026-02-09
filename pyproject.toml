@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdfstruct"
+version = "0.2.0"
+description = "Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support"
+readme = "README.md"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    {name = "Kyros Groupe"},
+]
+keywords = ["pdf", "parser", "document", "extraction", "tables", "structure"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: General",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pdfminer.six>=20231228",
+    "Pillow>=10.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/kyros-groupe/pdfstruct"
+Documentation = "https://github.com/kyros-groupe/pdfstruct#readme"
+Issues = "https://github.com/kyros-groupe/pdfstruct/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

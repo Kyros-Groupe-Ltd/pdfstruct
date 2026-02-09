@@ -1,2 +1,150 @@
 # pdfstruct
-Deterministic PDF object extraction and layout primitives for Python.
+
+Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support.
+
+[![Python](https://img.shields.io/badge/python-≥3.10-blue.svg)](https://www.python.org/)
+
+## Overview
+
+**pdfstruct** is a Python library that extracts structured content from PDF documents. Unlike basic text extraction tools, pdfstruct understands document layout — detecting headings, sections, tables, lists, headers/footers, and multi-column layouts using font analysis and geometric reasoning.
+
+## Features
+
+- **Font-aware heading detection**: Uses font size, weight, and frequency analysis to classify headings (H1–H6)
+- **Table extraction**: Detects tables from grid lines and whitespace-aligned columns
+- **Section hierarchy**: Builds a document tree from headings and content
+- **Multi-column support**: Handles two-column and multi-column layouts
+- **Header/footer removal**: Identifies and filters repeating page content
+- **List detection**: Recognizes bulleted, numbered, lettered, and Roman numeral lists
+- **Multiple output formats**: JSON, Markdown, and plain text
+- **Rich metadata**: Word count, language detection, reading time, font statistics
+
+## Installation
+
+```bash
+pip install pdfstruct
+```
+
+Or install from source:
+
+```bash
+git clone https://github.com/kyros-groupe/pdfstruct.git
+cd pdfstruct
+pip install -e .
+```
+
+## Quickstart
+
+```python
+import pdfstruct
+
+# Parse a PDF
+doc = pdfstruct.parse("contract.pdf")
+
+# Access structured content
+print(doc.title)
+print(f"{doc.page_count} pages, {doc.metadata.word_count} words")
+
+# Browse sections
+for section in doc.sections:
+    print(f"{section.heading} ({len(section.content)} chars)")
+    for sub in section.subsections:
+        print(f"  {sub.heading}")
+
+# Get tables
+for table in doc.tables:
+    print(table.to_dicts())  # List of row dicts
+
+# Export to different formats
+print(pdfstruct.to_markdown(doc))
+print(pdfstruct.to_text(doc))
+print(pdfstruct.to_json(doc))
+
+# Full dict for programmatic use
+data = pdfstruct.to_dict(doc)
+```
+
+## API Reference
+
+### `pdfstruct.parse(source, **options) -> Document`
+
+Parse a PDF file, bytes, or file-like object.
+
+**Options:**
+- `detect_tables` (bool, default True) — Enable table detection
+- `detect_headers_footers` (bool, default True) — Remove repeating headers/footers
+- `detect_lists` (bool, default True) — Detect list structures
+- `detect_columns` (bool, default True) — Handle multi-column layouts
+
+### Document
+
+- `doc.title` — Detected document title
+- `doc.pages` — List of Page objects
+- `doc.sections` — Hierarchical section tree
+- `doc.tables` — All detected tables
+- `doc.metadata` — DocumentMetadata with statistics
+- `doc.text` — Full document text (concatenated from pages)
+- `doc.to_dict()` — JSON-serializable dictionary
+
+### Section
+
+- `section.heading` — Section heading text
+- `section.heading_level` — HeadingLevel enum (H1–H6)
+- `section.content` — Section body text
+- `section.paragraphs` — List of Paragraph objects
+- `section.subsections` — Nested subsections
+
+### Table
+
+- `table.rows` — List of TableRow objects
+- `table.to_list()` — 2D list of cell text
+- `table.to_dicts()` — List of dicts (header row as keys)
+- `table.num_rows`, `table.num_cols` — Dimensions
+
+### Metadata
+
+- `metadata.word_count`, `metadata.char_count` — Text statistics
+- `metadata.language` — Detected language code
+- `metadata.page_count` — Number of pages
+- `metadata.is_scanned` — Whether PDF appears to be scanned
+- `metadata.has_tables`, `metadata.has_images` — Content flags
+- `metadata.primary_font`, `metadata.primary_font_size` — Font info
+
+## Architecture
+
+```
+pdfstruct/
+├── parser.py           # Main PDFParser class and parse() entry point
+├── models/
+│   ├── document.py     # Core models: Document, Page, Section, TextLine, Table, etc.
+│   └── metadata.py     # DocumentMetadata with computed statistics
+├── extractors/
+│   └── text.py         # PDF text extraction via pdfminer.six
+├── layout/
+│   └── analyzer.py     # Paragraph grouping, reading order, margins
+├── structure/
+│   ├── headings.py     # Font-aware heading detection
+│   ├── headers_footers.py  # Repeating content detection
+│   ├── lists.py        # List structure detection
+│   └── sections.py     # Section hierarchy builder
+├── tables/
+│   └── detector.py     # Grid and whitespace table detection
+├── output/
+│   ├── json_output.py  # JSON/dict export
+│   ├── markdown.py     # Markdown export
+│   └── text_output.py  # Plain text export
+└── utils/
+    ├── fonts.py        # Font analysis and heading classification
+    ├── geometry.py     # Bounding box utilities, column detection
+    └── language.py     # Language detection heuristics
+```
+
+## Requirements
+
+- Python >= 3.10
+- pdfminer.six >= 20231228
+- Pillow >= 10.0.0
+
+## License
+
+Personal Use License by Kyros Groupe. See [LICENSE](LICENSE) for details.
