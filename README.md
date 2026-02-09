@@ -168,7 +168,7 @@ Generate a thumbnail from extracted image bytes. Returns thumbnail bytes or None
 | **Markdown export** | ✅ | ❌ | ❌ | ✅ |
 | **JSON structured output** | ✅ | ❌ | ❌ | ✅ |
 | **Pure Python (no Java/Docker)** | ✅ | ✅ | ✅ | ❌ |
-| **License** | Personal Use | AGPL | MIT | Apache 2.0 |
+| **License** | Apache 2.0 | AGPL | MIT | Apache 2.0 |
 
 ## Real-World Benchmarks
 
@@ -229,4 +229,4 @@ pdfstruct/
 
 ## License
 
-Personal Use License by Kyros Groupe. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.

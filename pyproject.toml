@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdfstructx"
-version = "0.2.3"
+version = "0.2.4"
 description = "Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 authors = [
     {name = "Kyros Groupe"},
@@ -16,6 +16,7 @@ keywords = ["pdf", "parser", "document", "extraction", "tables", "structure"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

@@ -17,11 +17,11 @@ Export formats:
     >>> pdfstruct.to_text(doc)
     >>> pdfstruct.to_dict(doc)
 
-License: Personal Use Only — see LICENSE file.
+License: Apache 2.0 — see LICENSE file.
 Copyright (c) 2026 Kyros Groupe.
 """
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 from pdfstruct.parser import parse, PDFParser
 from pdfstruct.models.document import (
