@@ -1,153 +1,167 @@
-# pdfstruct
+<p align="center">
+  <h1 align="center">pdfstruct</h1>
+  <p align="center"><strong>The PDF parser built for AI pipelines.</strong><br>Structured sections, tables, images, and metadata — not just raw text.</p>
+</p>
 
-**The PDF parser built for AI pipelines.** Structured sections, tables, images, and metadata — not just raw text.
+<p align="center">
+  <a href="https://pypi.org/project/pdfstructx/"><img src="https://img.shields.io/pypi/v/pdfstructx.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/pdfstructx/"><img src="https://img.shields.io/pypi/dm/pdfstructx.svg" alt="Downloads"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.10-blue.svg" alt="Python"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License"></a>
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/pdfstructx.svg)](https://pypi.org/project/pdfstructx/)
-[![Python](https://img.shields.io/badge/python-≥3.10-blue.svg)](https://www.python.org/)
+---
 
-## Overview
+## Why pdfstruct?
 
-**pdfstruct** is a Python library that extracts structured content from PDF documents. Unlike basic text extraction tools, pdfstruct understands document layout — detecting headings, sections, tables, lists, headers/footers, and multi-column layouts using font analysis and geometric reasoning.
+Most PDF libraries give you a wall of text. pdfstruct gives you a **document**.
 
-## Features
+```python
+import pdfstruct
 
-- **Font-aware heading detection**: Uses font size, weight, and frequency analysis to classify headings (H1–H6)
-- **Table extraction**: Detects tables from grid lines and whitespace-aligned columns
-- **Image extraction**: Extracts embedded images with metadata, DPI estimation, caption detection, and cross-page deduplication
-- **Section hierarchy**: Builds a document tree from headings and content
-- **Multi-column support**: Handles two-column and multi-column layouts
-- **Header/footer removal**: Identifies and filters repeating page content
-- **List detection**: Recognizes bulleted, numbered, lettered, and Roman numeral lists
-- **Thumbnail generation**: Create thumbnails from extracted images
-- **Multiple output formats**: JSON, Markdown, and plain text
-- **Rich metadata**: Word count, language detection, reading time, font statistics, image stats
+doc = pdfstruct.parse("contract.pdf")
 
-## Installation
+# You get structure, not strings
+for section in doc.sections:
+    print(f"[{section.heading_level.name}] {section.heading}")
+    for sub in section.subsections:
+        print(f"  → {sub.heading}")
+
+# Tables come as data, not text blobs
+for table in doc.tables:
+    print(table.to_dicts())
+
+# Images with captions, DPI, deduplication
+doc = pdfstruct.parse("report.pdf", extract_images=True)
+for page in doc.pages:
+    for img in page.images:
+        print(f"{img.format} {img.width_px}×{img.height_px} @ {img.dpi:.0f} DPI")
+        if img.caption:
+            print(f"  Caption: {img.caption}")
+```
+
+---
+
+## Why not PyMuPDF?
+
+| | pdfstructx | PyMuPDF |
+|---|---|---|
+| **License** | Apache 2.0 — use it anywhere | AGPL — must open-source your code or buy a license |
+| **Structured output** | Sections, headings, tables, lists as objects | Flat text dump |
+| **Section hierarchy** | Full H1–H6 tree from font analysis | None |
+| **Table extraction** | Grid + whitespace detection, `.to_dicts()` | None (use another library) |
+| **Caption detection** | Auto-detects "Figure 1", "Table 2", etc. | None |
+| **Image deduplication** | SHA-256 hash, cross-page dedup | None — same logo 50 times |
+| **DPI estimation** | Computed from bbox vs pixel size | None |
+| **Pure Python** | ✅ pip install and go | C extension + AGPL concerns |
+
+PyMuPDF is fast. But it gives you raw text and an AGPL license. If you're building a product, that's a problem.
+
+---
+
+## Structured Output vs Raw Text
+
+Here's what you get from a 130-page government RFP:
+
+**PyMuPDF gives you this:**
+```
+CAHIER DES CHARGES TECHNIQUES GENERALES\n\n1. OBJET DU MARCHE\n\nLe présent
+marché a pour objet...\n\n1.1 Contexte\n\nLa Direction des Systèmes
+d'Information...\n\nTableau 1 : Planning prévisionnel\nPhase | Début | Fin |
+Livrable\nConception | 01/03 | 30/04 | Dossier de conception\n...
+```
+A single string. You parse it yourself. Good luck.
+
+**pdfstruct gives you this:**
+```python
+doc.sections[0].heading           # "CAHIER DES CHARGES TECHNIQUES GENERALES"
+doc.sections[0].heading_level     # HeadingLevel.H1
+doc.sections[0].subsections[0]    # Section("OBJET DU MARCHE", level=H2)
+
+doc.tables[0].to_dicts()
+# [{"Phase": "Conception", "Début": "01/03", "Fin": "30/04", "Livrable": "Dossier de conception"}, ...]
+
+doc.metadata.word_count           # 41420
+doc.metadata.language             # "fr"
+doc.metadata.has_tables           # True
+len(doc.tables)                   # 73
+len(doc.sections)                 # 62
+```
+
+Same PDF. One gives you text. The other gives you data.
+
+---
+
+## Install
 
 ```bash
 pip install pdfstructx
 ```
 
-Or install from source:
+That's it. Pure Python. No Java, no Docker, no C extensions.
 
 ```bash
+# Or from source
 git clone https://github.com/Kyros-Groupe-Ltd/pdfstruct.git
 cd pdfstruct
 pip install -e .
 ```
 
-## Quickstart
+## Quick Start
 
 ```python
 import pdfstruct
 
-# Parse a PDF
-doc = pdfstruct.parse("contract.pdf")
+# Parse any PDF
+doc = pdfstruct.parse("document.pdf")
 
-# Access structured content
+# Metadata
 print(doc.title)
 print(f"{doc.page_count} pages, {doc.metadata.word_count} words")
+print(f"Language: {doc.metadata.language}")
 
-# Browse sections
+# Sections — full hierarchy
 for section in doc.sections:
     print(f"{section.heading} ({len(section.content)} chars)")
     for sub in section.subsections:
         print(f"  {sub.heading}")
 
-# Get tables
+# Tables — as structured data
 for table in doc.tables:
-    print(table.to_dicts())  # List of row dicts
+    print(table.to_dicts())  # [{"col1": "val1", ...}, ...]
 
-# Extract images (opt-in)
-doc = pdfstruct.parse("report.pdf", extract_images=True)
-for page in doc.pages:
-    for img in page.images:
-        print(f"Page {img.page_number}: {img.format} {img.width_px}x{img.height_px} @ {img.dpi:.0f} DPI")
-        if img.caption:
-            print(f"  Caption: {img.caption}")
-        if img.image_bytes:
-            img.save(f"img_{img.page_number}_{img.image_index}.png")
-
-# Generate thumbnails
-thumbnail = pdfstruct.generate_thumbnail(img.image_bytes, max_size=(150, 150))
-
-# Export to different formats
-print(pdfstruct.to_markdown(doc))
-print(pdfstruct.to_text(doc))
-print(pdfstruct.to_json(doc))
-
-# Full dict for programmatic use
-data = pdfstruct.to_dict(doc)
+# Export
+print(pdfstruct.to_markdown(doc))   # Markdown
+print(pdfstruct.to_json(doc))       # JSON
+print(pdfstruct.to_text(doc))       # Plain text
+data = pdfstruct.to_dict(doc)       # Dict for programmatic use
 ```
 
-## API Reference
+### Image Extraction
 
-### `pdfstruct.parse(source, **options) -> Document`
+```python
+doc = pdfstruct.parse("report.pdf", extract_images=True)
 
-Parse a PDF file, bytes, or file-like object.
+for page in doc.pages:
+    for img in page.images:
+        print(f"Page {img.page_number}: {img.format} {img.width_px}×{img.height_px}")
+        print(f"  DPI: {img.dpi:.0f}, Size: {img.file_size_bytes} bytes")
 
-**Options:**
-- `detect_tables` (bool, default True) — Enable table detection
-- `detect_headers_footers` (bool, default True) — Remove repeating headers/footers
-- `detect_lists` (bool, default True) — Detect list structures
-- `detect_columns` (bool, default True) — Handle multi-column layouts
-- `extract_images` (bool, default False) — Enable full image extraction (opt-in)
-- `extract_image_data` (bool, default True) — Include raw image bytes (only when `extract_images=True`)
+        if img.caption:
+            print(f"  Caption: {img.caption}")
 
-### Document
+        if img.is_duplicate:
+            print(f"  ⚠ Duplicate of image {img.duplicate_of_index}")
+        else:
+            img.save(f"img_p{img.page_number}_{img.image_index}.png")
 
-- `doc.title` — Detected document title
-- `doc.pages` — List of Page objects
-- `doc.sections` — Hierarchical section tree
-- `doc.tables` — All detected tables
-- `doc.metadata` — DocumentMetadata with statistics
-- `doc.text` — Full document text (concatenated from pages)
-- `doc.to_dict()` — JSON-serializable dictionary
+# Thumbnails
+thumb = pdfstruct.generate_thumbnail(img.image_bytes, max_size=(150, 150))
+```
 
-### Section
+---
 
-- `section.heading` — Section heading text
-- `section.heading_level` — HeadingLevel enum (H1–H6)
-- `section.content` — Section body text
-- `section.paragraphs` — List of Paragraph objects
-- `section.subsections` — Nested subsections
-
-### Table
-
-- `table.rows` — List of TableRow objects
-- `table.to_list()` — 2D list of cell text
-- `table.to_dicts()` — List of dicts (header row as keys)
-- `table.num_rows`, `table.num_cols` — Dimensions
-
-### ImageInfo
-
-- `img.bbox` — BBox position on page
-- `img.width_px`, `img.height_px` — Pixel dimensions
-- `img.format` — Image format (jpeg, png, jbig2, ccitt, jpeg2000, raw)
-- `img.colorspace` — Color space (rgb, cmyk, grayscale, indexed)
-- `img.dpi_x`, `img.dpi_y`, `img.dpi` — DPI (estimated from bbox vs pixel size)
-- `img.image_bytes` — Raw image data (when `extract_image_data=True`)
-- `img.file_size_bytes` — Size of extracted image data
-- `img.content_hash` — SHA-256 hash for deduplication
-- `img.caption` — Auto-detected caption text (Figure 1, Fig. 2, etc.)
-- `img.page_number`, `img.image_index` — Location identifiers
-- `img.is_duplicate`, `img.duplicate_of_index` — Cross-page deduplication
-- `img.save(path)` — Save image to file
-
-### `pdfstruct.generate_thumbnail(image_bytes, max_size=(150, 150), output_format="PNG")`
-
-Generate a thumbnail from extracted image bytes. Returns thumbnail bytes or None.
-
-### Metadata
-
-- `metadata.word_count`, `metadata.char_count` — Text statistics
-- `metadata.language` — Detected language code
-- `metadata.page_count` — Number of pages
-- `metadata.is_scanned` — Whether PDF appears to be scanned
-- `metadata.has_tables`, `metadata.has_images` — Content flags
-- `metadata.primary_font`, `metadata.primary_font_size` — Font info
-
-## Comparison
+## Feature Comparison
 
 | Feature | pdfstructx | PyMuPDF | pdfplumber | Unstructured |
 |---|---|---|---|---|
@@ -170,9 +184,11 @@ Generate a thumbnail from extracted image bytes. Returns thumbnail bytes or None
 | **Pure Python (no Java/Docker)** | ✅ | ✅ | ✅ | ❌ |
 | **License** | Apache 2.0 | AGPL | MIT | Apache 2.0 |
 
+---
+
 ## Real-World Benchmarks
 
-Tested on actual documents — not toy examples:
+Tested on production documents — not toy examples.
 
 | Document | Pages | Words | Sections | Tables | Images (unique) | Time |
 |---|---|---|---|---|---|---|
@@ -181,7 +197,7 @@ Tested on actual documents — not toy examples:
 | 130-page gov't RFP | 130 | 41,420 | 62 | 73 | 269 (8 unique) | 10.2 s |
 | 224-page procurement doc | 224 | 53,979 | 107 | 118 | 408 (58 unique) | 23.6 s |
 
-**Head-to-head on the 130-page RFP:**
+### Head-to-Head: 130-Page Government RFP
 
 | Library | Time | Words | Tables | Sections | Images | Dedup |
 |---|---|---|---|---|---|---|
@@ -189,44 +205,129 @@ Tested on actual documents — not toy examples:
 | **pdfplumber** | 16.5 s | 43,420 | 142 | ❌ N/A | ❌ N/A | ❌ No |
 | **pdfstructx** | 13.1 s | 41,420 | 73 | 62 | 269 (8 unique) | ✅ 261 dupes filtered |
 
-PyMuPDF is faster (C-based) but gives you flat text — no sections, no structure, no deduplication. pdfplumber finds tables but no hierarchy. pdfstructx gives you the complete picture.
+PyMuPDF is faster (it's a C library). But it gives you flat text — no sections, no tables, no deduplication. pdfplumber finds tables but no hierarchy. **pdfstructx gives you the complete picture.**
+
+---
+
+## API Reference
+
+### `pdfstruct.parse(source, **options) → Document`
+
+Parse a PDF file path, bytes, or file-like object.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `detect_tables` | bool | `True` | Enable table detection |
+| `detect_headers_footers` | bool | `True` | Remove repeating headers/footers |
+| `detect_lists` | bool | `True` | Detect list structures |
+| `detect_columns` | bool | `True` | Handle multi-column layouts |
+| `extract_images` | bool | `False` | Extract embedded images (opt-in) |
+| `extract_image_data` | bool | `True` | Include raw bytes (when images enabled) |
+
+### Document
+
+| Property | Description |
+|---|---|
+| `doc.title` | Detected document title |
+| `doc.pages` | List of Page objects |
+| `doc.sections` | Hierarchical section tree |
+| `doc.tables` | All detected tables |
+| `doc.metadata` | DocumentMetadata with statistics |
+| `doc.text` | Full document text |
+
+### Section
+
+| Property | Description |
+|---|---|
+| `section.heading` | Section heading text |
+| `section.heading_level` | HeadingLevel enum (H1–H6) |
+| `section.content` | Section body text |
+| `section.paragraphs` | List of Paragraph objects |
+| `section.subsections` | Nested subsections |
+
+### Table
+
+| Method / Property | Description |
+|---|---|
+| `table.rows` | List of TableRow objects |
+| `table.to_list()` | 2D list of cell text |
+| `table.to_dicts()` | List of dicts (header row as keys) |
+| `table.num_rows` / `table.num_cols` | Dimensions |
+
+### ImageInfo
+
+| Property | Description |
+|---|---|
+| `img.width_px` / `img.height_px` | Pixel dimensions |
+| `img.format` | jpeg, png, jbig2, ccitt, jpeg2000, raw |
+| `img.colorspace` | rgb, cmyk, grayscale, indexed |
+| `img.dpi` | Estimated DPI |
+| `img.image_bytes` | Raw image data |
+| `img.caption` | Auto-detected caption text |
+| `img.content_hash` | SHA-256 for deduplication |
+| `img.is_duplicate` | Whether image is a duplicate |
+| `img.save(path)` | Save image to file |
+
+### Output Functions
+
+```python
+pdfstruct.to_json(doc)       # JSON string
+pdfstruct.to_dict(doc)       # Python dict
+pdfstruct.to_markdown(doc)   # Markdown string
+pdfstruct.to_text(doc)       # Plain text string
+
+pdfstruct.generate_thumbnail(image_bytes, max_size=(150, 150))  # Thumbnail bytes
+```
+
+---
 
 ## Architecture
 
 ```
 pdfstruct/
-├── parser.py           # Main PDFParser class and parse() entry point
+├── parser.py              # Main entry point: parse()
 ├── models/
-│   ├── document.py     # Core models: Document, Page, Section, TextLine, Table, ImageInfo, etc.
-│   └── metadata.py     # DocumentMetadata with computed statistics
+│   ├── document.py        # Document, Page, Section, Table, ImageInfo, etc.
+│   └── metadata.py        # Word count, language, reading time, font stats
 ├── extractors/
-│   ├── text.py         # PDF text extraction via pdfminer.six
-│   └── images.py       # Image extraction, caption detection, dedup, thumbnails
+│   ├── text.py            # Text extraction via pdfminer.six
+│   └── images.py          # Image extraction, captions, dedup, thumbnails
 ├── layout/
-│   └── analyzer.py     # Paragraph grouping, reading order, margins
+│   └── analyzer.py        # Paragraph grouping, reading order, columns
 ├── structure/
-│   ├── headings.py     # Font-aware heading detection
-│   ├── headers_footers.py  # Repeating content detection
-│   ├── lists.py        # List structure detection
-│   └── sections.py     # Section hierarchy builder
+│   ├── headings.py        # Font-aware heading detection (H1–H6)
+│   ├── headers_footers.py # Repeating content detection
+│   ├── lists.py           # Bullet, numbered, lettered, Roman lists
+│   └── sections.py        # Section hierarchy builder
 ├── tables/
-│   └── detector.py     # Grid and whitespace table detection
+│   └── detector.py        # Grid-line and whitespace table detection
 ├── output/
-│   ├── json_output.py  # JSON/dict export
-│   ├── markdown.py     # Markdown export
-│   └── text_output.py  # Plain text export
+│   ├── json_output.py     # JSON / dict export
+│   ├── markdown.py        # Markdown export
+│   └── text_output.py     # Plain text export
 └── utils/
-    ├── fonts.py        # Font analysis and heading classification
-    ├── geometry.py     # Bounding box utilities, column detection
-    └── language.py     # Language detection heuristics
+    ├── fonts.py           # Font analysis and classification
+    ├── geometry.py        # Bounding boxes, column detection
+    └── language.py        # Language detection heuristics
 ```
 
 ## Requirements
 
-- Python >= 3.10
-- pdfminer.six >= 20231228
-- Pillow >= 10.0.0
+- Python ≥ 3.10
+- [pdfminer.six](https://github.com/pdfminer/pdfminer.six) ≥ 20231228
+- [Pillow](https://python-pillow.org/) ≥ 10.0.0
+
+## Contributing
+
+Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for the full text.
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/Kyros-Groupe-Ltd"><strong>Kyros Groupe</strong></a><br>
+  <a href="https://github.com/Kyros-Groupe-Ltd">Follow us on GitHub</a> · <a href="https://github.com/Kyros-Groupe-Ltd/pdfstruct/stargazers">⭐ Star pdfstruct</a>
+</p>
