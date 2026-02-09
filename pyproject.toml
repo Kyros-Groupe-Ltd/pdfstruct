@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdfstructx"
-version = "0.2.1"
+version = "0.2.2"
 description = "Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support"
 readme = "README.md"
 license = {file = "LICENSE"}

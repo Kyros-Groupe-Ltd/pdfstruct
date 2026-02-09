@@ -21,7 +21,7 @@ License: Personal Use Only — see LICENSE file.
 Copyright (c) 2026 Kyros Groupe.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 from pdfstruct.parser import parse, PDFParser
 from pdfstruct.models.document import (
