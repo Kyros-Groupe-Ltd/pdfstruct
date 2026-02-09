@@ -1,7 +1,8 @@
 # pdfstruct
 
-Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support.
+**The PDF parser built for AI pipelines.** Structured sections, tables, images, and metadata — not just raw text.
 
+[![PyPI](https://img.shields.io/pypi/v/pdfstructx.svg)](https://pypi.org/project/pdfstructx/)
 [![Python](https://img.shields.io/badge/python-≥3.10-blue.svg)](https://www.python.org/)
 
 ## Overview
@@ -145,6 +146,50 @@ Generate a thumbnail from extracted image bytes. Returns thumbnail bytes or None
 - `metadata.is_scanned` — Whether PDF appears to be scanned
 - `metadata.has_tables`, `metadata.has_images` — Content flags
 - `metadata.primary_font`, `metadata.primary_font_size` — Font info
+
+## Comparison
+
+| Feature | pdfstructx | PyMuPDF | pdfplumber | Unstructured |
+|---|---|---|---|---|
+| **Text extraction** | ✅ | ✅ | ✅ | ✅ |
+| **Section hierarchy** (H1–H6 tree) | ✅ | ❌ | ❌ | Partial |
+| **Font-aware heading detection** | ✅ | ❌ | ❌ | ❌ |
+| **Table extraction** | ✅ | ❌ | ✅ | ✅ |
+| **Image extraction + metadata** | ✅ | ✅ | ❌ | ✅ |
+| **Caption detection** | ✅ | ❌ | ❌ | ❌ |
+| **Image deduplication** | ✅ | ❌ | ❌ | ❌ |
+| **DPI estimation** | ✅ | ❌ | ❌ | ❌ |
+| **Thumbnail generation** | ✅ | ❌ | ❌ | ❌ |
+| **Multi-column layout** | ✅ | ❌ | ❌ | ✅ |
+| **Header/footer removal** | ✅ | ❌ | ❌ | ✅ |
+| **List detection** | ✅ | ❌ | ❌ | ✅ |
+| **Language detection** | ✅ | ❌ | ❌ | ✅ |
+| **Reading time / word count** | ✅ | ❌ | ❌ | ❌ |
+| **Markdown export** | ✅ | ❌ | ❌ | ✅ |
+| **JSON structured output** | ✅ | ❌ | ❌ | ✅ |
+| **Pure Python (no Java/Docker)** | ✅ | ✅ | ✅ | ❌ |
+| **License** | Personal Use | AGPL | MIT | Apache 2.0 |
+
+## Real-World Benchmarks
+
+Tested on actual documents — not toy examples:
+
+| Document | Pages | Words | Sections | Tables | Images (unique) | Time |
+|---|---|---|---|---|---|---|
+| 3-page CV | 3 | 863 | 1 | 3 | 0 | 164 ms |
+| Bank statement (French) | 5 | 1,880 | 23 | 2 | 2 (1) | 379 ms |
+| 130-page gov't RFP | 130 | 41,420 | 62 | 73 | 269 (8 unique) | 10.2 s |
+| 224-page procurement doc | 224 | 53,979 | 107 | 118 | 408 (58 unique) | 23.6 s |
+
+**Head-to-head on the 130-page RFP:**
+
+| Library | Time | Words | Tables | Sections | Images | Dedup |
+|---|---|---|---|---|---|---|
+| **PyMuPDF** | 277 ms | 43,455 | ❌ N/A | ❌ N/A | 270 | ❌ No |
+| **pdfplumber** | 16.5 s | 43,420 | 142 | ❌ N/A | ❌ N/A | ❌ No |
+| **pdfstructx** | 13.1 s | 41,420 | 73 | 62 | 269 (8 unique) | ✅ 261 dupes filtered |
+
+PyMuPDF is faster (C-based) but gives you flat text — no sections, no structure, no deduplication. pdfplumber finds tables but no hierarchy. pdfstructx gives you the complete picture.
 
 ## Architecture
 
