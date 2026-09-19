@@ -10,7 +10,8 @@ import logging
 from io import BytesIO
 from typing import BinaryIO, Iterator
 
-from pdfminer.high_level import extract_pages
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.layout import (
     LAParams,
     LTAnno,
@@ -46,6 +47,12 @@ class RawPage:
         self.curves: list[BBox] = []
         self.figures: list[BBox] = []  # embedded figures/images
         self.page_layout: LTPage | None = None  # preserved for image extraction
+        self.mediabox: tuple[float, float, float, float] = (0, 0, width, height)
+        self.rotation: int = 0
+        self.is_scanned: bool = False
+        self.ocr_applied: bool = False
+        self.ocr_confidence: float | None = None
+        self.ocr_backend: str | None = None
 
 
 def extract_from_page(layout: LTPage) -> tuple[list[TextLine], list[Character], list[BBox], list[BBox]]:
@@ -182,12 +189,21 @@ def extract_pages_raw(
             boxes_flow=boxes_flow,
         )
 
-        for page_num, page_layout in enumerate(extract_pages(fp, laparams=laparams), start=1):
+        # Match pdfminer's high-level extraction while retaining inherited page
+        # geometry. OCR must render the same rotated MediaBox, not the CropBox.
+        manager = PDFResourceManager()
+        device = PDFPageAggregator(manager, laparams=laparams)
+        interpreter = PDFPageInterpreter(manager, device)
+        for page_num, pdf_page in enumerate(PDFPage.get_pages(fp), start=1):
+            interpreter.process_page(pdf_page)
+            page_layout = device.get_result()
             raw_page = RawPage(
                 number=page_num,
                 width=page_layout.width,
                 height=page_layout.height,
             )
+            raw_page.mediabox = tuple(pdf_page.mediabox)
+            raw_page.rotation = pdf_page.rotate
 
             lines, chars, rects, figures = extract_from_page(page_layout)
             raw_page.characters = chars

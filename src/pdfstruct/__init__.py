@@ -45,11 +45,14 @@ from pdfstruct.output.json_output import to_json, to_dict
 from pdfstruct.output.markdown import to_markdown
 from pdfstruct.output.text_output import to_text
 from pdfstruct.extractors.images import generate_thumbnail
+from pdfstruct.extractors.ocr import OCRDependencyError, OCRError
 
 __all__ = [
     # Core API
     "parse",
     "PDFParser",
+    "OCRDependencyError",
+    "OCRError",
     # Models
     "Document",
     "Page",

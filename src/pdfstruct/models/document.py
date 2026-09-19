@@ -241,6 +241,7 @@ class TextLine:
     heading_level: Optional[HeadingLevel] = None
     is_header: bool = False  # page header (repeating)
     is_footer: bool = False  # page footer (repeating)
+    ocr_confidence: float | None = None  # engine score, 0-100; None for native text
 
     def to_dict(self) -> dict:
         result = {
@@ -251,6 +252,8 @@ class TextLine:
         if self.is_heading:
             result["is_heading"] = True
             result["heading_level"] = self.heading_level.value if self.heading_level else None
+        if self.ocr_confidence is not None:
+            result["ocr_confidence"] = round(self.ocr_confidence, 2)
         return result
 
 
@@ -424,6 +427,10 @@ class Page:
     paragraphs: list[Paragraph] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
     images: list[ImageInfo] = field(default_factory=list)
+    is_scanned: bool = False  # pre-OCR heuristic, retained after recognition
+    ocr_applied: bool = False
+    ocr_confidence: float | None = None
+    ocr_backend: str | None = None
 
     @property
     def text(self) -> str:
@@ -437,6 +444,12 @@ class Page:
             "text": self.text,
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "tables": [t.to_dict() for t in self.tables],
+            "is_scanned": self.is_scanned,
+            "ocr_applied": self.ocr_applied,
+            "ocr_backend": self.ocr_backend,
+            "ocr_confidence": (
+                round(self.ocr_confidence, 2) if self.ocr_confidence is not None else None
+            ),
         }
         if self.images:
             result["images"] = [img.to_dict() for img in self.images]
