@@ -98,7 +98,8 @@ Same PDF. One gives you text. The other gives you data.
 pip install pdfstructx
 ```
 
-That's it. Pure Python. No Java, no Docker, no C extensions.
+The base parser requires no OCR engine, Java, or Docker. Scanned PDFs use an
+optional local OCR stack (with native runtimes); see below.
 
 ```bash
 # Or from source
@@ -106,6 +107,47 @@ git clone https://github.com/Kyros-Groupe-Ltd/pdfstruct.git
 cd pdfstruct
 pip install -e .
 ```
+
+## Scanned PDFs (local OCR)
+
+```bash
+pip install "pdfstructx[ocr]"
+```
+
+```python
+import pdfstruct
+
+# Automatically OCR likely scanned pages; keep native text on digital pages.
+doc = pdfstruct.parse("scanned-contract.pdf", ocr=True)
+print(doc.text)
+print(doc.metadata.ocr_page_count)
+
+for page in doc.pages:
+    print(page.number, page.ocr_backend, page.ocr_confidence)
+
+# Replace an existing/broken OCR layer without duplicating native text.
+doc = pdfstruct.parse("bad-text-layer.pdf", ocr="always")
+```
+
+The default backend runs **PaddleOCR PP-OCRv6 models through RapidOCR/ONNX Runtime**
+locally, with multilingual recognition including English, French, and Chinese.
+RapidOCR code and its converted PaddleOCR models are Apache-2.0 licensed;
+ONNX Runtime is MIT licensed. No cloud account or document upload is needed.
+
+For a lighter alternative, install `pdfstructx[tesseract]` and the system
+Tesseract executable plus language packs, then select it explicitly:
+
+```python
+doc = pdfstruct.parse(
+    "scanned-contract.pdf", ocr=True,
+    ocr_backend="tesseract", ocr_language="eng+fra", ocr_timeout=60,
+)
+```
+
+OCR text enters the existing paragraph, section, and export pipeline. It does
+not guarantee exact original fonts, handwriting recognition, or reconstruction
+of complex scanned tables. Confidence scores are engine estimates, not accuracy
+guarantees. See [OCR setup, licenses, limits, and deployment](docs/ocr.md).
 
 ## Quick Start
 
@@ -223,6 +265,12 @@ Parse a PDF file path, bytes, or file-like object.
 | `detect_columns` | bool | `True` | Handle multi-column layouts |
 | `extract_images` | bool | `False` | Extract embedded images (opt-in) |
 | `extract_image_data` | bool | `True` | Include raw bytes (when images enabled) |
+| `ocr` | bool or str | `False` | `True`/`"auto"`: OCR likely scans; `"always"`: OCR every page |
+| `ocr_backend` | str | `"rapidocr"` | Local `"rapidocr"` (PP-OCRv6) or `"tesseract"` |
+| `ocr_language` | str | `"eng"` | Tesseract language packs, e.g. `"eng+fra"`; RapidOCR is multilingual automatically |
+| `ocr_dpi` | int | `300` | Render resolution (72-600); max 40 million pixels/page |
+| `ocr_min_text_chars` | int | `50` | Auto OCR needs fewer native non-whitespace characters plus >=50% raster coverage |
+| `ocr_timeout` | float | `60` | Tesseract timeout in seconds/page; not a RapidOCR deadline |
 
 ### Document
 
@@ -316,6 +364,8 @@ pdfstruct/
 - Python ≥ 3.10
 - [pdfminer.six](https://github.com/pdfminer/pdfminer.six) ≥ 20231228
 - [Pillow](https://python-pillow.org/) ≥ 10.0.0
+- Optional OCR: [RapidOCR](https://github.com/RapidAI/RapidOCR), ONNX Runtime and
+  pypdfium2, or pytesseract with a separately installed Tesseract executable.
 
 ## Contributing
 

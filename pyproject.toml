@@ -31,10 +31,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ocr = [
+    "pypdfium2>=4.30.0",
+    "rapidocr>=3.9.2,<4",
+    "onnxruntime>=1.20,<2",
+]
+tesseract = [
+    "pypdfium2>=4.30.0",
+    "pytesseract>=0.3.13",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
     "ruff>=0.4.0",
+    "reportlab>=4.0",
 ]
 
 [project.urls]
@@ -47,6 +57,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["ocr_integration: requires the OCR extra and the Tesseract executable"]
 
 [tool.ruff]
 line-length = 100

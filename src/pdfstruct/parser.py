@@ -23,12 +23,14 @@ Usage:
 from __future__ import annotations
 
 import logging
+import os
 from typing import BinaryIO, Optional
 
 from pdfstruct.models.document import (
     Document, Page, Section, Paragraph, Table, TextLine, BBox, ImageInfo,
 )
 from pdfstruct.extractors.images import extract_images_from_page, deduplicate_images
+from pdfstruct.extractors.ocr import OCROptions, OCRMode, apply_ocr, is_scanned_page
 from pdfstruct.models.metadata import DocumentMetadata
 from pdfstruct.extractors.text import (
     extract_pages_raw, extract_pdf_metadata, RawPage,
@@ -69,6 +71,12 @@ class PDFParser:
         word_margin: float = 0.1,
         char_margin: float = 2.0,
         paragraph_spacing_factor: float = 1.8,
+        ocr: OCRMode = False,
+        ocr_language: str = "eng",
+        ocr_dpi: int = 300,
+        ocr_min_text_chars: int = 50,
+        ocr_timeout: float = 60.0,
+        ocr_backend: str = "rapidocr",
     ):
         self.detect_tables_enabled = detect_tables_enabled
         self.detect_headers_footers_enabled = detect_headers_footers_enabled
@@ -80,8 +88,12 @@ class PDFParser:
         self.word_margin = word_margin
         self.char_margin = char_margin
         self.paragraph_spacing_factor = paragraph_spacing_factor
+        self.ocr_options = OCROptions(
+            mode=ocr, language=ocr_language, dpi=ocr_dpi,
+            min_text_chars=ocr_min_text_chars, timeout=ocr_timeout, backend=ocr_backend,
+        )
 
-    def parse(self, source: str | bytes | BinaryIO) -> Document:
+    def parse(self, source: str | os.PathLike[str] | bytes | BinaryIO) -> Document:
         """Parse a PDF and return a structured Document.
 
         Args:
@@ -90,6 +102,10 @@ class PDFParser:
         Returns:
             Document with pages, sections, tables, and metadata
         """
+        # Snapshot streams once so metadata, text and OCR read identical bytes.
+        # Never close or leave a caller-owned seekable stream repositioned.
+        source = _normalize_source(source)
+
         # Step 1: Extract PDF metadata
         logger.info("Extracting PDF metadata...")
         try:
@@ -109,6 +125,11 @@ class PDFParser:
 
         if not raw_pages:
             return self._empty_document(pdf_meta)
+
+        # Classify from native content before OCR changes the text statistics.
+        for raw_page in raw_pages:
+            raw_page.is_scanned = is_scanned_page(raw_page, self.ocr_options.min_text_chars)
+        apply_ocr(source, raw_pages, self.ocr_options)
 
         # Step 3: Compute global font statistics
         all_lines: list[TextLine] = []
@@ -243,6 +264,10 @@ class PDFParser:
             number=raw_page.number,
             width=raw_page.width,
             height=raw_page.height,
+            is_scanned=raw_page.is_scanned,
+            ocr_applied=raw_page.ocr_applied,
+            ocr_confidence=raw_page.ocr_confidence,
+            ocr_backend=raw_page.ocr_backend,
             lines=content_lines,
             paragraphs=paragraphs,
             tables=tables,
@@ -309,10 +334,10 @@ class PDFParser:
             img.format for img in all_imgs if img.format not in ("unknown", "raw")
         ))
 
-        # Detect if scanned (very little text per page)
+        # Preserve scan provenance even after OCR produces plenty of text.
         page_count = len(pages)
-        avg_chars_per_page = len(full_text) / max(page_count, 1)
-        is_scanned = avg_chars_per_page < 50 and page_count > 0
+        scanned_page_count = sum(page.is_scanned for page in pages)
+        ocr_page_count = sum(page.ocr_applied for page in pages)
 
         return DocumentMetadata(
             author=pdf_meta.get("author"),
@@ -342,7 +367,10 @@ class PDFParser:
             fonts_used=list(font_stats["font_names"].keys())[:20],
             primary_font=font_stats["primary_font"],
             primary_font_size=font_stats["primary_size"],
-            is_scanned=is_scanned,
+            is_scanned=scanned_page_count > 0,
+            scanned_page_count=scanned_page_count,
+            ocr_applied=ocr_page_count > 0,
+            ocr_page_count=ocr_page_count,
             has_tables=len(tables) > 0,
             has_images=image_count > 0,
         )
@@ -353,7 +381,7 @@ class PDFParser:
             author=pdf_meta.get("author"),
             title=pdf_meta.get("title"),
             page_count=pdf_meta.get("page_count", 0),
-            is_scanned=True,
+            is_scanned=False,
         )
         return Document(metadata=metadata)
 
@@ -362,14 +390,41 @@ class PDFParser:
 _default_parser = PDFParser()
 
 
+def _normalize_source(source: str | os.PathLike[str] | bytes | BinaryIO) -> str | bytes:
+    if isinstance(source, os.PathLike):
+        return os.fspath(source)
+    if isinstance(source, (str, bytes)):
+        return source
+    position = None
+    try:
+        position = source.tell()
+        source.seek(0)
+    except (AttributeError, OSError):
+        position = None
+    try:
+        data = source.read()
+    finally:
+        if position is not None:
+            source.seek(position)
+    if not isinstance(data, bytes):
+        raise TypeError("source must be a PDF path, bytes, or a binary file-like object")
+    return data
+
+
 def parse(
-    source: str | bytes | BinaryIO,
+    source: str | os.PathLike[str] | bytes | BinaryIO,
     detect_tables: bool = True,
     detect_headers_footers: bool = True,
     detect_lists: bool = True,
     detect_columns: bool = True,
     extract_images: bool = False,
     extract_image_data: bool = True,
+    ocr: OCRMode = False,
+    ocr_language: str = "eng",
+    ocr_dpi: int = 300,
+    ocr_min_text_chars: int = 50,
+    ocr_timeout: float = 60.0,
+    ocr_backend: str = "rapidocr",
 ) -> Document:
     """Parse a PDF and return a structured Document.
 
@@ -383,6 +438,19 @@ def parse(
         detect_columns: enable multi-column detection
         extract_images: enable full image extraction (opt-in, default False)
         extract_image_data: include raw image bytes (only if extract_images=True)
+        ocr: False disables OCR (default); True/"auto" recognizes likely scanned
+            pages; "always" replaces native text on every page with OCR
+        ocr_language: Tesseract language codes, e.g. "eng" or "eng+fra";
+            RapidOCR uses automatic multilingual recognition instead
+        ocr_dpi: render resolution, 72-600 DPI (default 300)
+        ocr_min_text_chars: native non-whitespace character threshold for auto OCR
+        ocr_timeout: maximum Tesseract runtime per page, in seconds (default 60);
+            does not apply to in-process RapidOCR inference
+        ocr_backend: "rapidocr" (default, PP-OCRv6/ONNX) or "tesseract"
+
+    Raises:
+        OCRDependencyError: a selected OCR page needs missing dependencies
+        OCRError: page rendering, recognition, or the OCR timeout failed
 
     Returns:
         Document with pages, sections, tables, and metadata
@@ -409,5 +477,11 @@ def parse(
         detect_columns_enabled=detect_columns,
         extract_images=extract_images,
         extract_image_data=extract_image_data,
+        ocr=ocr,
+        ocr_language=ocr_language,
+        ocr_dpi=ocr_dpi,
+        ocr_min_text_chars=ocr_min_text_chars,
+        ocr_timeout=ocr_timeout,
+        ocr_backend=ocr_backend,
     )
     return parser.parse(source)
