@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from typing import Optional
 
 from pdfstruct.models.document import (
-    BBox, FontInfo, TextLine, Paragraph, HeadingLevel,
+    BBox,
+    Paragraph,
+    TextLine,
 )
 from pdfstruct.utils.geometry import (
-    horizontal_overlap, vertical_distance, compute_line_spacing, find_columns,
+    compute_line_spacing,
+    find_columns,
 )
-from pdfstruct.utils.fonts import compute_font_statistics
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def group_lines_into_paragraphs(
             should_break = True
 
         # 2. Check if current line is a heading
-        if curr_line.is_heading:
+        if curr_line.is_heading or prev_line.is_heading:
             should_break = True
 
         # 3. Check font size change (>20% different)
@@ -134,6 +135,8 @@ def _line_to_paragraph(line: TextLine) -> Paragraph:
         font=line.font,
         is_heading=line.is_heading,
         heading_level=line.heading_level,
+        page_number=line.page_number,
+        source=line.source,
     )
 
 
@@ -163,13 +166,15 @@ def _build_paragraph(lines: list[TextLine]) -> Paragraph:
         font=font,
         is_heading=is_heading,
         heading_level=heading_level,
+        page_number=lines[0].page_number,
+        source=lines[0].source if len({line.source for line in lines}) == 1 else "mixed",
     )
 
 
 def sort_lines_reading_order(
     lines: list[TextLine],
     page_width: float,
-    columns: Optional[list[tuple[float, float]]] = None,
+    columns: list[tuple[float, float]] | None = None,
 ) -> list[TextLine]:
     """Sort lines in natural reading order.
 

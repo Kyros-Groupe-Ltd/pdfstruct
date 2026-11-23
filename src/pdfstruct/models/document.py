@@ -9,11 +9,13 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+
+from pdfstruct.models.metadata import DocumentMetadata
 
 
 class HeadingLevel(Enum):
     """Heading hierarchy levels."""
+
     H1 = 1
     H2 = 2
     H3 = 3
@@ -24,6 +26,7 @@ class HeadingLevel(Enum):
 
 class ListType(Enum):
     """Types of lists detected in documents."""
+
     BULLETED = "bulleted"
     NUMBERED = "numbered"
     LETTERED = "lettered"
@@ -36,6 +39,7 @@ class BBox:
 
     Origin is bottom-left of the page (PDF coordinate system).
     """
+
     x0: float
     y0: float
     x1: float
@@ -71,8 +75,12 @@ class BBox:
 
     def contains(self, other: BBox) -> bool:
         """Check if this box fully contains another."""
-        return (self.x0 <= other.x0 and self.y0 <= other.y0
-                and self.x1 >= other.x1 and self.y1 >= other.y1)
+        return (
+            self.x0 <= other.x0
+            and self.y0 <= other.y0
+            and self.x1 >= other.x1
+            and self.y1 >= other.y1
+        )
 
     def merge(self, other: BBox) -> BBox:
         """Return a new BBox that encompasses both boxes."""
@@ -95,32 +103,33 @@ class ImageInfo:
     caption detection, and content-hash-based deduplication — exceeding what
     PyMuPDF offers.
     """
+
     bbox: BBox
     width_px: int = 0
     height_px: int = 0
-    format: str = "unknown"           # jpeg, png, jbig2, ccitt, jpeg2000, raw
-    colorspace: str = "unknown"       # rgb, cmyk, grayscale, indexed
+    format: str = "unknown"  # jpeg, png, jbig2, ccitt, jpeg2000, raw
+    colorspace: str = "unknown"  # rgb, cmyk, grayscale, indexed
     bits_per_component: int = 8
     dpi_x: float = 0.0
     dpi_y: float = 0.0
     has_mask: bool = False
 
     # Optional image data (only when extract_images=True with include_data=True)
-    image_bytes: Optional[bytes] = None
+    image_bytes: bytes | None = None
     file_size_bytes: int = 0
-    content_hash: Optional[str] = None  # SHA-256 truncated, for dedup
+    content_hash: str | None = None  # SHA-256 truncated, for dedup
 
     # Context
     page_number: int = 0
     image_index: int = 0
-    caption: Optional[str] = None
+    caption: str | None = None
 
     # Deduplication
     is_duplicate: bool = False
-    duplicate_of_index: Optional[int] = None
+    duplicate_of_index: int | None = None
 
     # Error tracking
-    extraction_error: Optional[str] = None
+    extraction_error: str | None = None
 
     @property
     def dpi(self) -> float:
@@ -136,7 +145,7 @@ class ImageInfo:
             return 0.0
         return self.width_px / self.height_px
 
-    def save(self, path: str, fmt: Optional[str] = None) -> bool:
+    def save(self, path: str, fmt: str | None = None) -> bool:
         """Save image data to disk.
 
         Args:
@@ -152,6 +161,7 @@ class ImageInfo:
         try:
             if fmt:
                 from PIL import Image as PILImage
+
                 img = PILImage.open(io.BytesIO(self.image_bytes))
                 if fmt.upper() == "JPEG" and img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
@@ -160,12 +170,13 @@ class ImageInfo:
                 with open(path, "wb") as f:
                     f.write(self.image_bytes)
             return True
-        except Exception:
+        except (OSError, ValueError):
             return False
 
     def to_dict(self, include_bytes: bool = False) -> dict:
         """Serialize to a JSON-compatible dictionary."""
         import base64
+
         result = {
             "bbox": self.bbox.to_dict(),
             "width_px": self.width_px,
@@ -198,18 +209,28 @@ class ImageInfo:
 @dataclass
 class FontInfo:
     """Font information for a text element."""
+
     name: str
     size: float
     is_bold: bool = False
     is_italic: bool = False
-    color: Optional[str] = None
+    color: str | None = None
+    is_estimated: bool = False
 
     @property
     def normalized_name(self) -> str:
         """Strip common font name suffixes to get the base family."""
         name = self.name
-        for suffix in ["-Bold", "-Italic", "-BoldItalic", ",Bold", ",Italic",
-                       "-Regular", ",Regular", "-Roman"]:
+        for suffix in [
+            "-Bold",
+            "-Italic",
+            "-BoldItalic",
+            ",Bold",
+            ",Italic",
+            "-Regular",
+            ",Regular",
+            "-Roman",
+        ]:
             name = name.replace(suffix, "")
         return name
 
@@ -219,72 +240,129 @@ class FontInfo:
             "size": round(self.size, 2),
             "is_bold": self.is_bold,
             "is_italic": self.is_italic,
+            "is_estimated": self.is_estimated,
         }
 
 
 @dataclass
 class Character:
     """A single character with position and font information."""
+
     text: str
     bbox: BBox
     font: FontInfo
+    geometry_is_estimated: bool = False
+
+
+@dataclass
+class OCRSpan:
+    """An engine-measured word or line, in normalized PDF page coordinates.
+
+    Confidence is an engine score on a 0–100 scale, not an accuracy probability.
+    Keep the polygon when available instead of presenting interpolated character
+    positions as measurements.
+    """
+
+    text: str
+    bbox: BBox
+    confidence: float | None = None
+    polygon: list[tuple[float, float]] = field(default_factory=list)
+    level: str = "word"
+
+    def to_dict(self) -> dict:
+        return {
+            "text": self.text,
+            "bbox": self.bbox.to_dict(),
+            "polygon": [list(point) for point in self.polygon],
+            "level": self.level,
+            "confidence": self.confidence,
+            "confidence_scale": "engine_score_0_100",
+        }
 
 
 @dataclass
 class TextLine:
     """A line of text — a horizontal sequence of characters."""
+
     text: str
     bbox: BBox
     font: FontInfo
     characters: list[Character] = field(default_factory=list)
     is_heading: bool = False
-    heading_level: Optional[HeadingLevel] = None
+    heading_level: HeadingLevel | None = None
     is_header: bool = False  # page header (repeating)
     is_footer: bool = False  # page footer (repeating)
     ocr_confidence: float | None = None  # engine score, 0-100; None for native text
+    ocr_spans: list[OCRSpan] = field(default_factory=list)
+    source: str = "native"
+    geometry_is_estimated: bool = False
+    page_number: int = 0
+    element_id: str | None = None
 
     def to_dict(self) -> dict:
         result = {
             "text": self.text,
             "bbox": self.bbox.to_dict(),
             "font": self.font.to_dict(),
+            "page": self.page_number,
+            "source": self.source,
+            "geometry_is_estimated": self.geometry_is_estimated,
         }
+        if self.element_id:
+            result["id"] = self.element_id
         if self.is_heading:
             result["is_heading"] = True
             result["heading_level"] = self.heading_level.value if self.heading_level else None
         if self.ocr_confidence is not None:
             result["ocr_confidence"] = round(self.ocr_confidence, 2)
+        if self.ocr_spans:
+            result["ocr_spans"] = [span.to_dict() for span in self.ocr_spans]
         return result
 
 
 @dataclass
 class ListItem:
     """An item in a bulleted or numbered list."""
+
     text: str
     marker: str  # "•", "1.", "a)", "i.", etc.
     level: int = 0  # nesting level (0 = top)
-    bbox: Optional[BBox] = None
+    bbox: BBox | None = None
 
     def to_dict(self) -> dict:
-        return {"marker": self.marker, "text": self.text, "level": self.level}
+        result = {"marker": self.marker, "text": self.text, "level": self.level}
+        if self.bbox:
+            result["bbox"] = self.bbox.to_dict()
+        return result
 
 
 @dataclass
 class Paragraph:
     """A paragraph — a logical block of text lines."""
+
     text: str
     lines: list[TextLine] = field(default_factory=list)
-    bbox: Optional[BBox] = None
-    font: Optional[FontInfo] = None
+    bbox: BBox | None = None
+    font: FontInfo | None = None
     is_heading: bool = False
-    heading_level: Optional[HeadingLevel] = None
-    list_items: Optional[list[ListItem]] = None
-    list_type: Optional[ListType] = None
+    heading_level: HeadingLevel | None = None
+    list_items: list[ListItem] | None = None
+    list_type: ListType | None = None
+    page_number: int = 0
+    source: str = "native"
+    element_id: str | None = None
+    table_id: str | None = None
 
     def to_dict(self) -> dict:
-        result = {"text": self.text}
+        result = {"text": self.text, "page": self.page_number, "source": self.source}
+        if self.element_id:
+            result["id"] = self.element_id
+        if self.table_id:
+            result["table_id"] = self.table_id
         if self.bbox:
             result["bbox"] = self.bbox.to_dict()
+        if self.lines:
+            result["lines"] = [line.to_dict() for line in self.lines]
         if self.is_heading and self.heading_level:
             result["heading_level"] = self.heading_level.value
         if self.list_items:
@@ -296,12 +374,13 @@ class Paragraph:
 @dataclass
 class TableCell:
     """A single cell in a table."""
+
     text: str
     row_index: int
     col_index: int
     rowspan: int = 1
     colspan: int = 1
-    bbox: Optional[BBox] = None
+    bbox: BBox | None = None
     is_header: bool = False
 
     def to_dict(self) -> dict:
@@ -316,64 +395,101 @@ class TableCell:
             result["colspan"] = self.colspan
         if self.is_header:
             result["is_header"] = True
+        if self.bbox:
+            result["bbox"] = self.bbox.to_dict()
         return result
 
 
 @dataclass
 class TableRow:
     """A row in a table."""
+
     cells: list[TableCell] = field(default_factory=list)
     is_header: bool = False
-    bbox: Optional[BBox] = None
+    bbox: BBox | None = None
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "cells": [cell.to_dict() for cell in self.cells],
             "is_header": self.is_header,
         }
+        if self.bbox:
+            result["bbox"] = self.bbox.to_dict()
+        return result
 
 
 @dataclass
 class Table:
     """A table detected in the document."""
+
     rows: list[TableRow] = field(default_factory=list)
-    bbox: Optional[BBox] = None
+    bbox: BBox | None = None
     page_number: int = 0
-    caption: Optional[str] = None
+    caption: str | None = None
+    element_id: str | None = None
+    quality_flags: list[str] = field(default_factory=list)
 
     @property
     def num_rows(self) -> int:
-        return len(self.rows)
+        return max(
+            len(self.rows),
+            max(
+                (cell.row_index + cell.rowspan for row in self.rows for cell in row.cells),
+                default=0,
+            ),
+        )
 
     @property
     def num_cols(self) -> int:
-        if not self.rows:
-            return 0
-        return max(len(row.cells) for row in self.rows)
+        return max(
+            (cell.col_index + cell.colspan for row in self.rows for cell in row.cells), default=0
+        )
 
     @property
-    def header_row(self) -> Optional[TableRow]:
+    def header_row(self) -> TableRow | None:
         for row in self.rows:
             if row.is_header:
                 return row
         return None
 
     def to_list(self) -> list[list[str]]:
-        """Convert to a 2D list of strings."""
-        return [[cell.text for cell in row.cells] for row in self.rows]
+        """Return a rectangular grid; merged content appears only at its anchor.
+
+        The full span information remains available in ``to_dict()``. Empty
+        strings occupy covered positions instead of duplicating a merged value.
+        """
+        grid = [[""] * self.num_cols for _ in range(self.num_rows)]
+        for row in self.rows:
+            for cell in row.cells:
+                grid[cell.row_index][cell.col_index] = cell.text
+        return grid
 
     def to_dicts(self) -> list[dict[str, str]]:
-        """Convert to a list of dicts using header row as keys."""
+        """Return rows without losing values to duplicate or empty header names."""
+        grid = self.to_list()
         header = self.header_row
         if not header:
-            return [{"col_" + str(i): cell.text for i, cell in enumerate(row.cells)}
-                    for row in self.rows]
+            return [{f"col_{i}": text for i, text in enumerate(row)} for row in grid]
 
-        keys = [cell.text for cell in header.cells]
+        header_index = min((cell.row_index for cell in header.cells), default=0)
+        labels = grid[header_index]
+        keys: list[str] = []
+        reserved = {label.strip() for label in labels if label.strip()}
+        for i, label in enumerate(labels):
+            base = label.strip() or f"col_{i}"
+            key = base
+            suffix = 2
+            while key in keys or (key != label.strip() and key in reserved):
+                key = f"{base}_{suffix}"
+                suffix += 1
+            keys.append(key)
+        header_indices = {
+            cell.row_index for row in self.rows if row.is_header for cell in row.cells
+        }
         return [
-            {keys[i] if i < len(keys) else f"col_{i}": cell.text
-             for i, cell in enumerate(row.cells)}
-            for row in self.rows if not row.is_header
+            dict(zip(keys, values))
+            for index, values in enumerate(grid)
+            if index not in header_indices
         ]
 
     def to_dict(self) -> dict:
@@ -387,19 +503,28 @@ class Table:
             result["caption"] = self.caption
         if self.bbox:
             result["bbox"] = self.bbox.to_dict()
+        if self.element_id:
+            result["id"] = self.element_id
+        if self.quality_flags:
+            result["quality_flags"] = self.quality_flags
         return result
 
 
 @dataclass
 class Section:
     """A section of a document — a heading plus its content."""
-    heading: Optional[str] = None
-    heading_level: Optional[HeadingLevel] = None
+
+    heading: str | None = None
+    heading_level: HeadingLevel | None = None
     content: str = ""
     paragraphs: list[Paragraph] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
     subsections: list[Section] = field(default_factory=list)
     page_number: int = 0
+    page_end: int = 0
+    heading_paragraph: Paragraph | None = None
+    element_id: str | None = None
+    blocks: list[Paragraph | Table] = field(default_factory=list, repr=False)
 
     def to_dict(self) -> dict:
         result = {}
@@ -414,12 +539,21 @@ class Section:
         if self.subsections:
             result["subsections"] = [s.to_dict() for s in self.subsections]
         result["page"] = self.page_number
+        result["page_start"] = self.page_number
+        result["page_end"] = self.page_end or self.page_number
+        if self.heading_paragraph:
+            result["heading_source"] = self.heading_paragraph.to_dict()
+        if self.element_id:
+            result["id"] = self.element_id
+        if self.blocks:
+            result["block_order"] = [block.element_id for block in self.blocks]
         return result
 
 
 @dataclass
 class Page:
     """A single page of the document."""
+
     number: int
     width: float
     height: float
@@ -431,6 +565,9 @@ class Page:
     ocr_applied: bool = False
     ocr_confidence: float | None = None
     ocr_backend: str | None = None
+    ocr_warnings: list[str] = field(default_factory=list)
+    ocr_regions: list[BBox] = field(default_factory=list)
+    table_warnings: list[str] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -442,11 +579,16 @@ class Page:
             "width": round(self.width, 2),
             "height": round(self.height, 2),
             "text": self.text,
+            "coordinate_system": "pdfminer_layout_bottom_left_points",
+            "lines": [line.to_dict() for line in self.lines],
             "paragraphs": [p.to_dict() for p in self.paragraphs],
             "tables": [t.to_dict() for t in self.tables],
             "is_scanned": self.is_scanned,
             "ocr_applied": self.ocr_applied,
             "ocr_backend": self.ocr_backend,
+            "ocr_warnings": self.ocr_warnings,
+            "ocr_regions": [region.to_dict() for region in self.ocr_regions],
+            "table_warnings": self.table_warnings,
             "ocr_confidence": (
                 round(self.ocr_confidence, 2) if self.ocr_confidence is not None else None
             ),
@@ -459,11 +601,12 @@ class Page:
 @dataclass
 class Document:
     """The top-level parsed document."""
-    title: Optional[str] = None
+
+    title: str | None = None
     pages: list[Page] = field(default_factory=list)
     sections: list[Section] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
-    metadata: Optional[DocumentMetadata] = None
+    metadata: DocumentMetadata | None = None
 
     @property
     def text(self) -> str:

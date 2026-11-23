@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdfstructx"
-version = "0.2.4"
+version = "0.3.0"
 description = "Intelligent PDF parser with font-aware structure detection, table extraction, and multi-column support"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -31,6 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+documents = [
+    "python-docx>=1.2,<2",
+]
 ocr = [
     "pypdfium2>=4.30.0",
     "rapidocr>=3.9.2,<4",
@@ -57,7 +60,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["ocr_integration: requires the OCR extra and the Tesseract executable"]
+markers = ["ocr_integration: requires local OCR engines and model assets"]
 
 [tool.ruff]
 line-length = 100

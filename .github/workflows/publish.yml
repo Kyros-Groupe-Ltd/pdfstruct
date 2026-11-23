@@ -7,56 +7,112 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check source versions and release tag
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: python scripts/verify_release.py version --tag "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      - name: Install build tools
+        run: python -m pip install --upgrade build twine
+      - name: Build and validate distributions
+        run: |
+          python -m build
+          python -m twine check --strict dist/*
+          python scripts/verify_release.py distributions
+      - name: Store the exact distributions to test and publish
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-distributions
+          path: dist/
+      - name: Install the built wheel with test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-      - name: Run tests
-        run: pytest -m "not ocr_integration" --tb=short -q
+          for wheel in dist/*.whl; do python -m pip install "${wheel}[dev,documents]"; done
+      - name: Verify the installed wheel and public API
+        env:
+          EXPECTED_VERSION: ${{ needs.build.outputs.version }}
+        run: python -I scripts/verify_release.py smoke --expected-version "$EXPECTED_VERSION" --pdf tests/fixtures/structured.pdf --documents
+      - name: Run tests against the installed wheel
+        run: python -m pytest -m "not ocr_integration" --tb=short -q
 
   ocr-test:
+    needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install OCR dependencies
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-distributions
+          path: dist/
+      - name: Install the built wheel and English/French OCR dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+          sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-fra fonts-dejavu-core
           python -m pip install --upgrade pip
-          pip install -e ".[dev,ocr,tesseract]"
-      - name: Exercise real RapidOCR and Tesseract engines
-        run: pytest -m ocr_integration --tb=short -q
+          for wheel in dist/*.whl; do python -m pip install "${wheel}[dev,documents,ocr,tesseract]"; done
+      - name: Require both real OCR engines and recognize French
+        run: python -I scripts/verify_release.py ocr-smoke
+      - name: Exercise all tests with every optional dependency installed
+        run: python -m pytest --tb=short -q
 
   publish:
-    needs: [test, ocr-test]
+    needs: [build, test, ocr-test]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 10
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
-      id-token: write  # Required for trusted publishing
+      id-token: write
+    # Preserve the existing publisher identity: no GitHub environment is added here.
+    # The PyPI Trusted Publisher must match publish.yml; see docs/releasing.md.
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Retrieve the distributions that passed all checks
+        uses: actions/download-artifact@v4
         with:
-          python-version: "3.12"
-      - name: Install build tools
-        run: python -m pip install --upgrade pip build
-      - name: Build package
-        run: python -m build
-      - name: Publish to PyPI
+          name: release-distributions
+          path: dist/
+      - name: Publish to PyPI with Trusted Publishing
         uses: pypa/gh-action-pypi-publish@release/v1

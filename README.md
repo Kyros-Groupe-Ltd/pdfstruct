@@ -1,383 +1,222 @@
-<p align="center">
-  <h1 align="center">pdfstruct</h1>
-  <p align="center"><strong>The PDF parser built for AI pipelines.</strong><br>Structured sections, tables, images, and metadata — not just raw text.</p>
-</p>
+# pdfstructx
 
-<p align="center">
-  <a href="https://pypi.org/project/pdfstructx/"><img src="https://img.shields.io/pypi/v/pdfstructx.svg" alt="PyPI"></a>
-  <a href="https://pypi.org/project/pdfstructx/"><img src="https://img.shields.io/pypi/dm/pdfstructx.svg" alt="Downloads"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-≥3.10-blue.svg" alt="Python"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="License"></a>
-</p>
+Local document extraction for Python applications. The PyPI distribution is
+`pdfstructx`; the Python import is `pdfstruct`. Apache License 2.0.
 
----
-
-## Why pdfstruct?
-
-Most PDF libraries give you a wall of text. pdfstruct gives you a **document**.
-
-```python
-import pdfstruct
-
-doc = pdfstruct.parse("contract.pdf")
-
-# You get structure, not strings
-for section in doc.sections:
-    print(f"[{section.heading_level.name}] {section.heading}")
-    for sub in section.subsections:
-        print(f"  → {sub.heading}")
-
-# Tables come as data, not text blobs
-for table in doc.tables:
-    print(table.to_dicts())
-
-# Images with captions, DPI, deduplication
-doc = pdfstruct.parse("report.pdf", extract_images=True)
-for page in doc.pages:
-    for img in page.images:
-        print(f"{img.format} {img.width_px}×{img.height_px} @ {img.dpi:.0f} DPI")
-        if img.caption:
-            print(f"  Caption: {img.caption}")
-```
-
----
-
-## Why not PyMuPDF?
-
-| | pdfstructx | PyMuPDF |
-|---|---|---|
-| **License** | Apache 2.0 — use it anywhere | AGPL — must open-source your code or buy a license |
-| **Structured output** | Sections, headings, tables, lists as objects | Flat text dump |
-| **Section hierarchy** | Full H1–H6 tree from font analysis | None |
-| **Table extraction** | Grid + whitespace detection, `.to_dicts()` | None (use another library) |
-| **Caption detection** | Auto-detects "Figure 1", "Table 2", etc. | None |
-| **Image deduplication** | SHA-256 hash, cross-page dedup | None — same logo 50 times |
-| **DPI estimation** | Computed from bbox vs pixel size | None |
-| **Pure Python** | ✅ pip install and go | C extension + AGPL concerns |
-
-PyMuPDF is fast. But it gives you raw text and an AGPL license. If you're building a product, that's a problem.
-
----
-
-## Structured Output vs Raw Text
-
-Here's what you get from a 130-page government RFP:
-
-**PyMuPDF gives you this:**
-```
-CAHIER DES CHARGES TECHNIQUES GENERALES\n\n1. OBJET DU MARCHE\n\nLe présent
-marché a pour objet...\n\n1.1 Contexte\n\nLa Direction des Systèmes
-d'Information...\n\nTableau 1 : Planning prévisionnel\nPhase | Début | Fin |
-Livrable\nConception | 01/03 | 30/04 | Dossier de conception\n...
-```
-A single string. You parse it yourself. Good luck.
-
-**pdfstruct gives you this:**
-```python
-doc.sections[0].heading           # "CAHIER DES CHARGES TECHNIQUES GENERALES"
-doc.sections[0].heading_level     # HeadingLevel.H1
-doc.sections[0].subsections[0]    # Section("OBJET DU MARCHE", level=H2)
-
-doc.tables[0].to_dicts()
-# [{"Phase": "Conception", "Début": "01/03", "Fin": "30/04", "Livrable": "Dossier de conception"}, ...]
-
-doc.metadata.word_count           # 41420
-doc.metadata.language             # "fr"
-doc.metadata.has_tables           # True
-len(doc.tables)                   # 73
-len(doc.sections)                 # 62
-```
-
-Same PDF. One gives you text. The other gives you data.
-
----
+The PDF parser extracts native text, font evidence, sections, tables and images.
+Optional local OCR recognizes scanned regions. A separate ingestion API normalizes
+PDF, DOCX and TXT into source-anchored blocks for search and retrieval pipelines.
 
 ## Install
 
 ```bash
 pip install pdfstructx
+pip install 'pdfstructx[documents]'            # optional DOCX ingestion
+pip install 'pdfstructx[ocr]'                  # optional RapidOCR / ONNX OCR
+pip install 'pdfstructx[tesseract]'            # optional Tesseract Python adapter
 ```
 
-The base parser requires no OCR engine, Java, or Docker. Scanned PDFs use an
-optional local OCR stack (with native runtimes); see below.
+Python 3.10 or later is supported. The Tesseract option also needs the system
+`tesseract` executable and the requested language files. OCR uses native runtimes;
+the Python package does not bundle an operating-system sandbox or a cloud service.
+To develop this checkout:
 
 ```bash
-# Or from source
-git clone https://github.com/Kyros-Groupe-Ltd/pdfstruct.git
-cd pdfstruct
-pip install -e .
+python -m venv .venv
+.venv/bin/python -m pip install -e '.[dev,documents,ocr,tesseract]'
 ```
 
-## Scanned PDFs (local OCR)
-
-```bash
-pip install "pdfstructx[ocr]"
-```
+## PDF API
 
 ```python
 import pdfstruct
 
-# Automatically OCR likely scanned pages; keep native text on digital pages.
-doc = pdfstruct.parse("scanned-contract.pdf", ocr=True)
-print(doc.text)
-print(doc.metadata.ocr_page_count)
+pdf = pdfstruct.parse('report.pdf')
+print(pdf.title, pdf.page_count, pdf.metadata.language)
+for section in pdf.sections:
+    print(section.heading, section.page_number, section.page_end)
+for table in pdf.tables:
+    print(table.page_number, table.to_list(), table.to_dicts())
 
-for page in doc.pages:
-    print(page.number, page.ocr_backend, page.ocr_confidence)
-
-# Replace an existing/broken OCR layer without duplicating native text.
-doc = pdfstruct.parse("bad-text-layer.pdf", ocr="always")
+json_text = pdfstruct.to_json(pdf)
+markdown = pdfstruct.to_markdown(pdf)
+plain_text = pdfstruct.to_text(pdf)
 ```
 
-The default backend runs **PaddleOCR PP-OCRv6 models through RapidOCR/ONNX Runtime**
-locally, with multilingual recognition including English, French, and Chinese.
-RapidOCR code and its converted PaddleOCR models are Apache-2.0 licensed;
-ONNX Runtime is MIT licensed. No cloud account or document upload is needed.
+`parse()` accepts a local path, PDF bytes or a binary stream. A caller-owned
+seekable stream is restored to its original position and is never closed.
+It remains a PDF-specific API; use `parse_document()` for multiple formats.
 
-For a lighter alternative, install `pdfstructx[tesseract]` and the system
-Tesseract executable plus language packs, then select it explicitly:
+## PDF, DOCX and TXT ingestion
 
 ```python
-doc = pdfstruct.parse(
-    "scanned-contract.pdf", ocr=True,
-    ocr_backend="tesseract", ocr_language="eng+fra", ocr_timeout=60,
+from pdfstruct import parse_document
+
+source = parse_document('project-description.docx')
+for block in source.blocks:
+    print(block.id, block.kind, block.text, block.locator)
+
+# Uploaded bytes require a filename for explicit format selection.
+source = parse_document(
+    'Le projet concerne le Québec.'.encode('utf-8'),
+    filename='description.txt',
+    max_bytes=25_000_000,
 )
 ```
 
-OCR text enters the existing paragraph, section, and export pipeline. It does
-not guarantee exact original fonts, handwriting recognition, or reconstruction
-of complex scanned tables. Confidence scores are engine estimates, not accuracy
-guarantees. See [OCR setup, licenses, limits, and deployment](docs/ocr.md).
+Block IDs combine the source content hash with a format-specific anchor. PDF
+anchors include actual page numbers and boxes; DOCX uses paragraph/table/cell
+anchors; TXT uses line ranges. DOCX and TXT do not receive invented PDF pages.
+Treat document access permissions separately from its hash: identical bytes can
+belong to different users, tenants or retention policies.
 
-## Quick Start
+DOCX ingestion preserves body paragraphs/tables in order, heading-style evidence,
+Unicode text and merged-cell anchors. It is not a Word rendering engine. Headers,
+footers, text boxes, tracked changes and other unsupported constructs require
+review; warnings describe known extraction limitations. TXT decoding is strict
+UTF-8 by default, with UTF-16/32 BOM recognition and an explicit encoding override.
+See [ingestion](docs/ingestion.md) for the complete contract and limits.
+
+## Local OCR, including French
+
+OCR is **off by default**. Automatic mode identifies raster regions that lack
+usable native text, including a scanned body beneath a native header or an insert
+beside native paragraphs. It preserves usable native content and reconciles
+same-location duplicates.
 
 ```python
 import pdfstruct
 
-# Parse any PDF
-doc = pdfstruct.parse("document.pdf")
+pdf = pdfstruct.parse('mixed-document.pdf', ocr='auto')
+for page in pdf.pages:
+    print(page.number, page.ocr_applied, page.ocr_backend, page.ocr_warnings)
 
-# Metadata
-print(doc.title)
-print(f"{doc.page_count} pages, {doc.metadata.word_count} words")
-print(f"Language: {doc.metadata.language}")
+# Explicit local French/English Tesseract configuration.
+pdf = pdfstruct.parse(
+    'scan.pdf',
+    ocr='auto',
+    ocr_backend='tesseract',
+    ocr_language='fra+eng',
+    ocr_tessdata_dir='/opt/ocr/tessdata',
+    ocr_offline=True,
+)
 
-# Sections — full hierarchy
-for section in doc.sections:
-    print(f"{section.heading} ({len(section.content)} chars)")
-    for sub in section.subsections:
-        print(f"  {sub.heading}")
-
-# Tables — as structured data
-for table in doc.tables:
-    print(table.to_dicts())  # [{"col1": "val1", ...}, ...]
-
-# Export
-print(pdfstruct.to_markdown(doc))   # Markdown
-print(pdfstruct.to_json(doc))       # JSON
-print(pdfstruct.to_text(doc))       # Plain text
-data = pdfstruct.to_dict(doc)       # Dict for programmatic use
+# Use the same options through the format adapter.
+source = pdfstruct.parse_document(
+    'scan.pdf',
+    pdf_options={
+        'ocr': 'auto',
+        'ocr_backend': 'rapidocr',
+        'ocr_model_dir': '/opt/ocr/rapidocr',
+        'ocr_offline': True,
+    },
+)
 ```
 
-### Image Extraction
+The default backend runs PP-OCRv6 models through RapidOCR and ONNX Runtime.
+Tesseract is an explicit alternative. `ocr_offline=True` checks local assets before
+initialization; deployment-level egress controls must enforce network isolation.
+Recognition runs locally and has no cloud OCR fallback. French model support does
+not certify performance on every Canadian French vocabulary, handwriting or scan.
+
+`ocr='always'` recognizes every nonblank page, preferring recovered OCR at overlap
+locations while preserving unmatched native text. It does not blindly erase
+native text when OCR returns nothing. Backend failures raise `OCRError`;
+missing dependencies/assets raise `OCRDependencyError`; empty recognition and
+unrecovered damaged text produce page warnings.
+
+See [OCR configuration, dependencies, geometry and limits](docs/ocr.md).
+
+## Structure, tables and evidence
+
+- Native text retains PDF layout boxes and font evidence. OCR spans retain measured
+  word/line boxes, polygons where available and engine confidence scores. Estimated
+  character positions and fonts are explicitly marked.
+- Page/paragraph/line/table identifiers and section page ranges support citations.
+  Coordinates use the normalized pdfminer page layout, bottom-left origin, in
+  points. Match the page transform when overlaying on a rendered viewer.
+- Ruled tables use local closed-cell geometry, so separate grids on one page do
+  not become a page-wide Cartesian table. Glyphs are assigned once to cells.
+- Merged cells occur once at an anchor with `rowspan`/`colspan`. `to_list()` leaves
+  covered positions empty. JSON preserves spans and boxes; Markdown cannot
+  represent merged-cell layout faithfully.
+- `to_dicts()` disambiguates duplicate or empty column labels instead of silently
+  overwriting a value. Header inference and borderless tables remain heuristics.
+- Structured exports emit each table once in its owning section. Page paragraphs
+  still expose table text for compatibility and mark it with `table_id`; avoid
+  independently indexing both that text and the canonical table blocks.
+
+Heading detection, reading order, lists, language identification and header/footer
+removal are heuristics. Raster OCR does not reconstruct drawn table rules or
+supply a scanned-table structure model. Inspect `ocr_warnings`, table quality
+flags and ingestion warnings before treating extracted information as reliable.
+When native text crosses a table border, the parser preserves the complete text
+and reports `table_text_crosses_boundary` instead of emitting a truncated table.
+`Page.table_warnings` also reports table-work limits. Applications should route
+these cases for review rather than silently treating them as table-free documents.
+
+## Image extraction
 
 ```python
-doc = pdfstruct.parse("report.pdf", extract_images=True)
-
-for page in doc.pages:
-    for img in page.images:
-        print(f"Page {img.page_number}: {img.format} {img.width_px}×{img.height_px}")
-        print(f"  DPI: {img.dpi:.0f}, Size: {img.file_size_bytes} bytes")
-
-        if img.caption:
-            print(f"  Caption: {img.caption}")
-
-        if img.is_duplicate:
-            print(f"  ⚠ Duplicate of image {img.duplicate_of_index}")
-        else:
-            img.save(f"img_p{img.page_number}_{img.image_index}.png")
-
-# Thumbnails
-thumb = pdfstruct.generate_thumbnail(img.image_bytes, max_size=(150, 150))
+pdf = pdfstruct.parse('report.pdf', extract_images=True)
+for page in pdf.pages:
+    for image in page.images:
+        print(image.width_px, image.height_px, image.format, image.dpi)
+        print(image.caption, image.content_hash, image.is_duplicate)
+        if not image.is_duplicate:
+            image.save(f'image-{page.number}-{image.image_index}.png', fmt='PNG')
 ```
 
----
+Image data, format, dimensions, inferred captions, hashes and estimated DPI are
+available. `extract_image_data=False` omits raw image data; image extraction is
+opt-in. `generate_thumbnail(image_bytes, max_size=(150, 150))` creates a thumbnail.
 
-## Feature Comparison
+## Important parser options
 
-| Feature | pdfstructx | PyMuPDF | pdfplumber | Unstructured |
-|---|---|---|---|---|
-| **Text extraction** | ✅ | ✅ | ✅ | ✅ |
-| **Section hierarchy** (H1–H6 tree) | ✅ | ❌ | ❌ | Partial |
-| **Font-aware heading detection** | ✅ | ❌ | ❌ | ❌ |
-| **Table extraction** | ✅ | ❌ | ✅ | ✅ |
-| **Image extraction + metadata** | ✅ | ✅ | ❌ | ✅ |
-| **Caption detection** | ✅ | ❌ | ❌ | ❌ |
-| **Image deduplication** | ✅ | ❌ | ❌ | ❌ |
-| **DPI estimation** | ✅ | ❌ | ❌ | ❌ |
-| **Thumbnail generation** | ✅ | ❌ | ❌ | ❌ |
-| **Multi-column layout** | ✅ | ❌ | ❌ | ✅ |
-| **Header/footer removal** | ✅ | ❌ | ❌ | ✅ |
-| **List detection** | ✅ | ❌ | ❌ | ✅ |
-| **Language detection** | ✅ | ❌ | ❌ | ✅ |
-| **Reading time / word count** | ✅ | ❌ | ❌ | ❌ |
-| **Markdown export** | ✅ | ❌ | ❌ | ✅ |
-| **JSON structured output** | ✅ | ❌ | ❌ | ✅ |
-| **Pure Python (no Java/Docker)** | ✅ | ✅ | ✅ | ❌ |
-| **License** | Apache 2.0 | AGPL | MIT | Apache 2.0 |
+| Option | Default | Behaviour |
+| --- | --- | --- |
+| `detect_tables` | `True` | Detect ruled and conservative borderless tables |
+| `detect_headers_footers` | `True` | Remove likely repeated page decorations |
+| `detect_lists` | `True` | Detect list structures |
+| `detect_columns` | `True` | Infer multicolumn reading order |
+| `extract_images` | `False` | Extract image metadata and optionally bytes |
+| `extract_image_data` | `True` | Include bytes when image extraction is enabled |
+| `ocr` | `False` | `True`/`'auto'` selects scan regions; `'always'` recognizes pages |
+| `ocr_backend` | `'rapidocr'` | `'rapidocr'` or `'tesseract'` |
+| `ocr_language` | `'eng'` | Tesseract languages, e.g. `'fra+eng'`; RapidOCR is multilingual |
+| `ocr_dpi` | `300` | Render resolution, 72–600 DPI; bounded raster size |
+| `ocr_min_text_chars` | `50` | Native-text routing signal; not a page-wide OCR veto |
+| `ocr_timeout` | `60` | Tesseract recognition timeout; no in-process RapidOCR deadline |
+| `ocr_model_dir` | `None` | Explicit local RapidOCR model directory |
+| `ocr_tessdata_dir` | `None` | Explicit local Tesseract language directory |
+| `ocr_offline` | `False` | Validate local assets before engine initialization |
+| `table_detection_limits` | `None` | Optional `TableDetectionLimits` override; safe per-page defaults apply |
 
----
+`PDFParser` additionally exposes layout grouping parameters. Configure deployment
+limits for untrusted inputs; an in-process function cannot enforce a hard CPU,
+memory or full-document wall-time limit. Use isolated worker processes, limit
+concurrency, and terminate workers that exceed their job deadline. PDFium renderer
+calls are serialized inside a process; use processes for parallel OCR throughput.
 
-## Real-World Benchmarks
+## Development and release
 
-Tested on production documents — not toy examples.
-
-| Document | Pages | Words | Sections | Tables | Images (unique) | Time |
-|---|---|---|---|---|---|---|
-| 3-page CV | 3 | 863 | 1 | 3 | 0 | 164 ms |
-| Bank statement (French) | 5 | 1,880 | 23 | 2 | 2 (1) | 379 ms |
-| 130-page gov't RFP | 130 | 41,420 | 62 | 73 | 269 (8 unique) | 10.2 s |
-| 224-page procurement doc | 224 | 53,979 | 107 | 118 | 408 (58 unique) | 23.6 s |
-
-### Head-to-Head: 130-Page Government RFP
-
-| Library | Time | Words | Tables | Sections | Images | Dedup |
-|---|---|---|---|---|---|---|
-| **PyMuPDF** | 277 ms | 43,455 | ❌ N/A | ❌ N/A | 270 | ❌ No |
-| **pdfplumber** | 16.5 s | 43,420 | 142 | ❌ N/A | ❌ N/A | ❌ No |
-| **pdfstructx** | 13.1 s | 41,420 | 73 | 62 | 269 (8 unique) | ✅ 261 dupes filtered |
-
-PyMuPDF is faster (it's a C library). But it gives you flat text — no sections, no tables, no deduplication. pdfplumber finds tables but no hierarchy. **pdfstructx gives you the complete picture.**
-
----
-
-## API Reference
-
-### `pdfstruct.parse(source, **options) → Document`
-
-Parse a PDF file path, bytes, or file-like object.
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `detect_tables` | bool | `True` | Enable table detection |
-| `detect_headers_footers` | bool | `True` | Remove repeating headers/footers |
-| `detect_lists` | bool | `True` | Detect list structures |
-| `detect_columns` | bool | `True` | Handle multi-column layouts |
-| `extract_images` | bool | `False` | Extract embedded images (opt-in) |
-| `extract_image_data` | bool | `True` | Include raw bytes (when images enabled) |
-| `ocr` | bool or str | `False` | `True`/`"auto"`: OCR likely scans; `"always"`: OCR every page |
-| `ocr_backend` | str | `"rapidocr"` | Local `"rapidocr"` (PP-OCRv6) or `"tesseract"` |
-| `ocr_language` | str | `"eng"` | Tesseract language packs, e.g. `"eng+fra"`; RapidOCR is multilingual automatically |
-| `ocr_dpi` | int | `300` | Render resolution (72-600); max 40 million pixels/page |
-| `ocr_min_text_chars` | int | `50` | Auto OCR needs fewer native non-whitespace characters plus >=50% raster coverage |
-| `ocr_timeout` | float | `60` | Tesseract timeout in seconds/page; not a RapidOCR deadline |
-
-### Document
-
-| Property | Description |
-|---|---|
-| `doc.title` | Detected document title |
-| `doc.pages` | List of Page objects |
-| `doc.sections` | Hierarchical section tree |
-| `doc.tables` | All detected tables |
-| `doc.metadata` | DocumentMetadata with statistics |
-| `doc.text` | Full document text |
-
-### Section
-
-| Property | Description |
-|---|---|
-| `section.heading` | Section heading text |
-| `section.heading_level` | HeadingLevel enum (H1–H6) |
-| `section.content` | Section body text |
-| `section.paragraphs` | List of Paragraph objects |
-| `section.subsections` | Nested subsections |
-
-### Table
-
-| Method / Property | Description |
-|---|---|
-| `table.rows` | List of TableRow objects |
-| `table.to_list()` | 2D list of cell text |
-| `table.to_dicts()` | List of dicts (header row as keys) |
-| `table.num_rows` / `table.num_cols` | Dimensions |
-
-### ImageInfo
-
-| Property | Description |
-|---|---|
-| `img.width_px` / `img.height_px` | Pixel dimensions |
-| `img.format` | jpeg, png, jbig2, ccitt, jpeg2000, raw |
-| `img.colorspace` | rgb, cmyk, grayscale, indexed |
-| `img.dpi` | Estimated DPI |
-| `img.image_bytes` | Raw image data |
-| `img.caption` | Auto-detected caption text |
-| `img.content_hash` | SHA-256 for deduplication |
-| `img.is_duplicate` | Whether image is a duplicate |
-| `img.save(path)` | Save image to file |
-
-### Output Functions
-
-```python
-pdfstruct.to_json(doc)       # JSON string
-pdfstruct.to_dict(doc)       # Python dict
-pdfstruct.to_markdown(doc)   # Markdown string
-pdfstruct.to_text(doc)       # Plain text string
-
-pdfstruct.generate_thumbnail(image_bytes, max_size=(150, 150))  # Thumbnail bytes
+```bash
+.venv/bin/python -m pytest -q
+.venv/bin/python -m pytest -m ocr_integration -q
+.venv/bin/python -m build
+.venv/bin/python -m twine check --strict dist/*
 ```
 
----
-
-## Architecture
-
-```
-pdfstruct/
-├── parser.py              # Main entry point: parse()
-├── models/
-│   ├── document.py        # Document, Page, Section, Table, ImageInfo, etc.
-│   └── metadata.py        # Word count, language, reading time, font stats
-├── extractors/
-│   ├── text.py            # Text extraction via pdfminer.six
-│   └── images.py          # Image extraction, captions, dedup, thumbnails
-├── layout/
-│   └── analyzer.py        # Paragraph grouping, reading order, columns
-├── structure/
-│   ├── headings.py        # Font-aware heading detection (H1–H6)
-│   ├── headers_footers.py # Repeating content detection
-│   ├── lists.py           # Bullet, numbered, lettered, Roman lists
-│   └── sections.py        # Section hierarchy builder
-├── tables/
-│   └── detector.py        # Grid-line and whitespace table detection
-├── output/
-│   ├── json_output.py     # JSON / dict export
-│   ├── markdown.py        # Markdown export
-│   └── text_output.py     # Plain text export
-└── utils/
-    ├── fonts.py           # Font analysis and classification
-    ├── geometry.py        # Bounding boxes, column detection
-    └── language.py        # Language detection heuristics
-```
-
-## Requirements
-
-- Python ≥ 3.10
-- [pdfminer.six](https://github.com/pdfminer/pdfminer.six) ≥ 20231228
-- [Pillow](https://python-pillow.org/) ≥ 10.0.0
-- Optional OCR: [RapidOCR](https://github.com/RapidAI/RapidOCR), ONNX Runtime and
-  pypdfium2, or pytesseract with a separately installed Tesseract executable.
-
-## Contributing
-
-Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Integration tests need installed engines and local model assets. The release
+workflow explicitly requires real English/French OCR rather than treating skipped
+integration tests as a sufficient release check. It builds once, tests the same
+wheel on Python 3.10–3.13, then publishes that artifact only on a matching version
+tag. See [the release procedure](docs/releasing.md), [validation](docs/validation.md)
+and [changes in 0.3.0](CHANGELOG.md).
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for the full text.
-
----
-
-<p align="center">
-  Built by <a href="https://github.com/Kyros-Groupe-Ltd"><strong>Kyros Groupe</strong></a><br>
-  <a href="https://github.com/Kyros-Groupe-Ltd">Follow us on GitHub</a> · <a href="https://github.com/Kyros-Groupe-Ltd/pdfstruct/stargazers">⭐ Star pdfstruct</a>
-</p>
+The project code is Apache-2.0; retain its license and notices when redistributing.
+Optional engines, renderers, model files and bundled native dependencies have their
+own licenses and notices. See [LICENSE](LICENSE) and [OCR dependencies](docs/ocr.md).
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).

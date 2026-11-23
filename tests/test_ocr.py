@@ -36,18 +36,25 @@ def make_pdf(*kinds, rotation=0, crop=False, scan_text=SCAN_TEXT):
     if crop:
         pdf.setCropBox((100, 100, 500, 300))
     for kind in kinds:
-        if kind in ("scan", "sparse_scan", "searchable", "logo", "tiled", "overlap"):
+        if kind in (
+            "scan", "sparse_scan", "searchable", "header_scan", "small_scan",
+            "logo", "tiled", "overlap", "blank_scan",
+        ):
             image = Image.new("RGB", (1200, 800), "white")
             draw = ImageDraw.Draw(image)
             try:
                 font = ImageFont.truetype("DejaVuSans.ttf", 40)
             except OSError:
                 font = ImageFont.load_default()
-            draw.text((100, 160), scan_text, fill="black", font=font)
-            draw.text((100, 240), "Amount due 250 dollars", fill="black", font=font)
+            if kind != "blank_scan":
+                draw.text((100, 160), scan_text, fill="black", font=font)
+                draw.text((100, 240), "Amount due 250 dollars", fill="black", font=font)
+                draw.text((100, 320), "Please contact our finance team", fill="black", font=font)
             reader = ImageReader(image)
             if kind == "logo":
                 pdf.drawImage(reader, 20, 20, width=60, height=40)
+            elif kind == "small_scan":
+                pdf.drawImage(reader, 180, 120, width=240, height=160)
             elif kind == "tiled":
                 pdf.drawImage(reader, 0, 0, width=300, height=400)
                 pdf.drawImage(reader, 300, 0, width=300, height=400)
@@ -56,8 +63,13 @@ def make_pdf(*kinds, rotation=0, crop=False, scan_text=SCAN_TEXT):
                     pdf.drawImage(reader, 0, 0, width=240, height=400)
             else:
                 pdf.drawImage(reader, 0, 0, width=600, height=400)
-        if kind in ("native", "searchable"):
+        if kind in ("native", "header_scan", "small_scan"):
             pdf.drawString(50, 350, NATIVE_TEXT)
+        if kind == "searchable":
+            # A complete usable text layer in the image body, not just a header.
+            pdf.drawString(50, 300, scan_text)
+            pdf.drawString(50, 260, "Amount due 250 dollars")
+            pdf.drawString(50, 220, "Please contact our finance team")
         if kind in ("short", "sparse_scan"):
             pdf.drawString(50, 30, "Page 1")
         if kind == "vector":
@@ -92,10 +104,12 @@ def word_data():
         ("tiled", True),
         ("native", False),
         ("searchable", False),
+        ("header_scan", True),
+        ("small_scan", True),
         ("short", False),
         ("blank", False),
         ("logo", False),
-        ("overlap", False),
+        ("overlap", True),  # One real 40%-page region still needs recognition.
         ("vector", False),
     ],
 )
@@ -106,7 +120,9 @@ def test_scan_detection(kind, expected):
 
 def test_zero_threshold_still_recognizes_image_only_pages():
     assert is_scanned_page(next(extract_pages_raw(make_pdf("scan"))), 0)
-    assert not is_scanned_page(next(extract_pages_raw(make_pdf("sparse_scan"))), 0)
+    # A footer does not make the raster body searchable, even with threshold=0.
+    assert is_scanned_page(next(extract_pages_raw(make_pdf("sparse_scan"))), 0)
+    assert not is_scanned_page(next(extract_pages_raw(make_pdf("searchable"))), 0)
 
 
 @pytest.mark.parametrize(
@@ -151,6 +167,13 @@ def test_word_positions_and_confidence():
     assert "".join(char.text for char in line.characters) == "Hello world"
     assert line.ocr_confidence == confidence == 85
     assert line.to_dict()["ocr_confidence"] == 85
+    assert line.source == "ocr"
+    assert line.geometry_is_estimated and line.font.is_estimated
+    assert all(char.geometry_is_estimated for char in line.characters)
+    assert [span.text for span in line.ocr_spans] == ["Hello", "world"]
+    assert [span.level for span in line.ocr_spans] == ["word", "word"]
+    assert line.ocr_spans[0].bbox == BBox(10, 370, 35, 380)
+    assert line.ocr_spans[0].confidence == 90
 
 
 def test_line_grouping_includes_block_and_paragraph():
@@ -231,7 +254,7 @@ def test_tesseract_configuration_and_missing_executable(monkeypatch):
     )
     engine.recognize(None, OCROptions(language="eng+fra", dpi=200, timeout=5))
     assert calls == [
-        {"lang": "eng+fra", "config": "--dpi 200", "output_type": "dict", "timeout": 5}
+        {"lang": "eng+fra", "config": "--dpi 200 --oem 1", "output_type": "dict", "timeout": 5}
     ]
 
     def missing(*args, **kwargs):
@@ -316,6 +339,8 @@ def test_rapidocr_adapter_coordinates_and_bgr():
     assert lines[0].text == "中文 English français"
     assert lines[0].bbox == BBox(30, 180, 330, 240)
     assert confidence == pytest.approx(94)
+    assert lines[0].ocr_spans[0].level == "line"
+    assert lines[0].ocr_spans[0].polygon == [(30, 240), (330, 240), (330, 180), (30, 180)]
 
 
 def require_engine(backend):

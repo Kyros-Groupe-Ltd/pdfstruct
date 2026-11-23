@@ -10,33 +10,21 @@ This module classifies text lines as headings based on:
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from pdfstruct.models.document import HeadingLevel, TextLine
-from pdfstruct.utils.fonts import compute_font_statistics, classify_heading_level
-
+from pdfstruct.utils.fonts import classify_heading_level, compute_font_statistics
 
 # Regex patterns for structural heading detection
-NUMBERED_HEADING = re.compile(
-    r"^(\d{1,3}\.(?:\d{1,3}\.){0,4})\s+(.+)$"
-)
-ROMAN_HEADING = re.compile(
-    r"^((?:X{0,3})(IX|IV|V?I{0,3}))\.\s+(.+)$", re.IGNORECASE
-)
-LETTERED_HEADING = re.compile(
-    r"^([A-Z])\.\s+(.+)$"
-)
-ALL_CAPS_LINE = re.compile(
-    r"^[A-Z][A-Z\s\-&/,.:;()]{2,97}$"
-)
-COLON_HEADING = re.compile(
-    r"^(.{3,60}):$"
-)
+NUMBERED_HEADING = re.compile(r"^((?:\d{1,3}\.){1,4}\d{1,3}\.?|\d{1,3}\.)\s+(.+)$")
+ROMAN_HEADING = re.compile(r"^((?:X{0,3})(IX|IV|V?I{0,3}))\.\s+(.+)$", re.IGNORECASE)
+LETTERED_HEADING = re.compile(r"^([A-Z])\.\s+(.+)$")
+TOC_ENTRY = re.compile(r"\.{3,}\s*\d+\s*$")
+COLON_HEADING = re.compile(r"^(.{3,60}):$")
 
 
 def detect_headings(
     lines: list[TextLine],
-    font_stats: Optional[dict] = None,
+    font_stats: dict | None = None,
 ) -> list[TextLine]:
     """Detect and mark heading lines using font analysis + regex patterns.
 
@@ -60,7 +48,7 @@ def detect_headings(
     # Pass 1: Font-based heading detection
     for line in lines:
         text = line.text.strip()
-        if not text:
+        if not text or TOC_ENTRY.search(text):
             continue
 
         # Skip very long lines (unlikely to be headings)
@@ -104,7 +92,7 @@ def detect_headings(
                 continue
 
             text = line.text.strip()
-            if not text or len(text) > 150:
+            if not text or len(text) > 150 or TOC_ENTRY.search(text):
                 continue
 
             level = _regex_heading_level(text, line.font.is_bold)
@@ -115,16 +103,16 @@ def detect_headings(
     return lines
 
 
-def _regex_heading_level(text: str, is_bold: bool) -> Optional[int]:
+def _regex_heading_level(text: str, is_bold: bool) -> int | None:
     """Detect heading level from text patterns alone.
 
     Returns 1-6 or None.
     """
     # Numbered: "1. Introduction" → H2, "1.1 Overview" → H3
     m = NUMBERED_HEADING.match(text)
-    if m:
+    if m and any(char.isalpha() for char in m.group(2)):
         num_part = m.group(1)
-        depth = num_part.count(".")
+        depth = len(num_part.rstrip(".").split("."))
         return min(depth + 1, 6)
 
     # Roman numerals: "I. Introduction" → H1
@@ -138,7 +126,11 @@ def _regex_heading_level(text: str, is_bold: bool) -> Optional[int]:
         return 2
 
     # ALL CAPS: "INTRODUCTION" → H2 (if short enough and not a sentence)
-    if ALL_CAPS_LINE.match(text):
+    if (
+        3 <= len(text) <= 98
+        and text.isupper()
+        and all(char.isalpha() or char.isspace() or char in "-&/,.:;()'’" for char in text)
+    ):
         words = text.split()
         if len(words) <= 6:
             return 2 if is_bold else 3
