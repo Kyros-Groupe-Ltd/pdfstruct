@@ -7,25 +7,27 @@ and page dimensions — the raw building blocks for all higher-level analysis.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from io import BytesIO
-from typing import BinaryIO, Iterator
+from typing import BinaryIO
 
-from pdfminer.high_level import extract_pages
+from pdfminer.converter import PDFPageAggregator
 from pdfminer.layout import (
     LAParams,
     LTAnno,
     LTChar,
+    LTCurve,
     LTFigure,
     LTLine,
-    LTRect,
-    LTCurve,
     LTPage,
+    LTRect,
     LTTextBox,
     LTTextLine,
 )
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
-from pdfminer.pdfdocument import PDFDocument
 
 from pdfstruct.models.document import BBox, Character, FontInfo, TextLine
 from pdfstruct.utils.fonts import parse_font_info
@@ -46,6 +48,14 @@ class RawPage:
         self.curves: list[BBox] = []
         self.figures: list[BBox] = []  # embedded figures/images
         self.page_layout: LTPage | None = None  # preserved for image extraction
+        self.mediabox: tuple[float, float, float, float] = (0, 0, width, height)
+        self.rotation: int = 0
+        self.is_scanned: bool = False
+        self.ocr_applied: bool = False
+        self.ocr_confidence: float | None = None
+        self.ocr_backend: str | None = None
+        self.ocr_regions: list[BBox] = []
+        self.ocr_warnings: list[str] = []
 
 
 def extract_from_page(layout: LTPage) -> tuple[list[TextLine], list[Character], list[BBox], list[BBox]]:
@@ -117,10 +127,7 @@ def extract_from_page(layout: LTPage) -> tuple[list[TextLine], list[Character], 
                 ))
                 characters.extend(line_chars)
 
-        elif isinstance(element, (LTRect, LTLine)):
-            rects.append(BBox(x0=element.x0, y0=element.y0, x1=element.x1, y1=element.y1))
-
-        elif isinstance(element, LTCurve):
+        elif isinstance(element, (LTRect, LTLine, LTCurve)):
             rects.append(BBox(x0=element.x0, y0=element.y0, x1=element.x1, y1=element.y1))
 
         elif isinstance(element, LTFigure):
@@ -165,7 +172,7 @@ def extract_pages_raw(
         boxes_flow: pdfminer LAParams boxes_flow (None for no layout analysis)
     """
     if isinstance(source, str):
-        fp = open(source, "rb")
+        fp = open(source, "rb")  # noqa: SIM115 - only owned streams are closed in finally
         should_close = True
     elif isinstance(source, bytes):
         fp = BytesIO(source)
@@ -182,12 +189,21 @@ def extract_pages_raw(
             boxes_flow=boxes_flow,
         )
 
-        for page_num, page_layout in enumerate(extract_pages(fp, laparams=laparams), start=1):
+        # Match pdfminer's high-level extraction while retaining inherited page
+        # geometry. OCR must render the same rotated MediaBox, not the CropBox.
+        manager = PDFResourceManager()
+        device = PDFPageAggregator(manager, laparams=laparams)
+        interpreter = PDFPageInterpreter(manager, device)
+        for page_num, pdf_page in enumerate(PDFPage.get_pages(fp), start=1):
+            interpreter.process_page(pdf_page)
+            page_layout = device.get_result()
             raw_page = RawPage(
                 number=page_num,
                 width=page_layout.width,
                 height=page_layout.height,
             )
+            raw_page.mediabox = tuple(pdf_page.mediabox)
+            raw_page.rotation = pdf_page.rotate
 
             lines, chars, rects, figures = extract_from_page(page_layout)
             raw_page.characters = chars
@@ -214,7 +230,7 @@ def extract_pdf_metadata(source: str | bytes | BinaryIO) -> dict:
     creation_date, modification_date, keywords.
     """
     if isinstance(source, str):
-        fp = open(source, "rb")
+        fp = open(source, "rb")  # noqa: SIM115 - only owned streams are closed in finally
         should_close = True
     elif isinstance(source, bytes):
         fp = BytesIO(source)

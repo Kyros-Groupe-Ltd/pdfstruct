@@ -54,6 +54,9 @@ class DocumentMetadata:
     has_tables: bool = False
     has_images: bool = False
     is_encrypted: bool = False
+    ocr_applied: bool = False
+    scanned_page_count: int = 0
+    ocr_page_count: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +71,8 @@ class DocumentMetadata:
             },
             "statistics": {
                 "page_count": self.page_count,
+                "scanned_page_count": self.scanned_page_count,
+                "ocr_page_count": self.ocr_page_count,
                 "word_count": self.word_count,
                 "char_count": self.char_count,
                 "char_count_no_spaces": self.char_count_no_spaces,
@@ -89,6 +94,7 @@ class DocumentMetadata:
             },
             "flags": {
                 "is_scanned": self.is_scanned,
+                "ocr_applied": self.ocr_applied,
                 "has_tables": self.has_tables,
                 "has_images": self.has_images,
                 "is_encrypted": self.is_encrypted,

@@ -1,132 +1,62 @@
-"""Section builder — organizes paragraphs into a hierarchical section tree."""
+"""Build a section hierarchy with real source pages and one table owner."""
 
 from __future__ import annotations
 
-from typing import Optional
-
-from pdfstruct.models.document import (
-    Section, Paragraph, Table, HeadingLevel,
-)
+from pdfstruct.models.document import Paragraph, Section, Table
+from pdfstruct.structure.blocks import content_blocks
 
 
-def build_sections(
-    paragraphs: list[Paragraph],
-    tables: list[Table],
-) -> list[Section]:
-    """Build a hierarchical section tree from paragraphs and tables.
-
-    Paragraphs marked as headings become section headers. Content between
-    headings becomes the section body. Subsections nest based on heading level.
-    """
-    if not paragraphs:
-        return []
-
-    # If no headings at all, return a single section with all content
-    has_headings = any(p.is_heading for p in paragraphs)
-    if not has_headings:
-        return [_build_single_section(paragraphs, tables)]
-
-    # Build flat list of sections first
-    flat_sections: list[Section] = []
-    current_content: list[Paragraph] = []
-
-    for para in paragraphs:
-        if para.is_heading:
-            # Save accumulated content to previous section
-            if current_content and flat_sections:
-                _add_content_to_section(flat_sections[-1], current_content, tables)
-                current_content = []
-            elif current_content:
-                # Content before first heading — create an untitled section
-                flat_sections.append(_build_content_section(current_content, tables))
-                current_content = []
-
-            # Start new section
-            flat_sections.append(Section(
-                heading=para.text,
-                heading_level=para.heading_level,
-                page_number=0,  # filled later if needed
-            ))
+def build_sections(paragraphs: list[Paragraph], tables: list[Table]) -> list[Section]:
+    """Use heading paragraphs as boundaries while preserving source anchors."""
+    flat: list[Section] = []
+    current: Section | None = None
+    for block in content_blocks(paragraphs, tables):
+        if isinstance(block, Paragraph) and block.is_heading and not block.table_id:
+            current = Section(
+                heading=block.text,
+                heading_level=block.heading_level,
+                heading_paragraph=block,
+                page_number=block.page_number,
+                page_end=block.page_number,
+            )
+            flat.append(current)
+            continue
+        if current is None:
+            current = Section(page_number=block.page_number, page_end=block.page_number)
+            flat.append(current)
+        current.blocks.append(block)
+        if isinstance(block, Table):
+            current.tables.append(block)
         else:
-            current_content.append(para)
+            current.paragraphs.append(block)
 
-    # Add remaining content to last section
-    if current_content:
-        if flat_sections:
-            _add_content_to_section(flat_sections[-1], current_content, tables)
-        else:
-            flat_sections.append(_build_content_section(current_content, tables))
+    for index, section in enumerate(flat, 1):
+        section.element_id = f"section{index}"
+        section.content = "\n\n".join(paragraph.text for paragraph in section.paragraphs)
 
-    # Build hierarchy from flat sections
-    return _nest_sections(flat_sections)
-
-
-def _build_single_section(paragraphs: list[Paragraph], tables: list[Table]) -> Section:
-    """Create a single section from all paragraphs (no headings detected)."""
-    content = "\n\n".join(p.text for p in paragraphs)
-    return Section(
-        heading=None,
-        heading_level=None,
-        content=content,
-        paragraphs=paragraphs,
-        tables=tables,
-    )
-
-
-def _build_content_section(paragraphs: list[Paragraph], tables: list[Table]) -> Section:
-    """Create an untitled section from content before the first heading."""
-    content = "\n\n".join(p.text for p in paragraphs)
-    return Section(
-        heading=None,
-        heading_level=None,
-        content=content,
-        paragraphs=paragraphs,
-    )
-
-
-def _add_content_to_section(
-    section: Section,
-    paragraphs: list[Paragraph],
-    tables: list[Table],
-) -> None:
-    """Add paragraphs to a section's content."""
-    section.paragraphs.extend(paragraphs)
-    section.content = "\n\n".join(p.text for p in section.paragraphs)
-
-
-def _nest_sections(flat_sections: list[Section]) -> list[Section]:
-    """Build a nested section hierarchy from a flat list.
-
-    Uses heading levels to determine parent-child relationships:
-    H1 > H2 > H3, etc. An H2 becomes a subsection of the preceding H1.
-    """
-    if not flat_sections:
-        return []
-
-    root_sections: list[Section] = []
-    stack: list[Section] = []  # stack of parent sections
-
-    for section in flat_sections:
-        level = _get_level(section)
-
-        # Pop stack until we find a parent with a lower level (higher heading)
-        while stack and _get_level(stack[-1]) >= level:
+    roots: list[Section] = []
+    stack: list[Section] = []
+    for section in flat:
+        level = section.heading_level.value if section.heading_level else 0
+        while stack and (stack[-1].heading_level.value if stack[-1].heading_level else 0) >= level:
             stack.pop()
-
         if stack:
-            # This section is a subsection of the top of the stack
             stack[-1].subsections.append(section)
         else:
-            # This is a root-level section
-            root_sections.append(section)
-
+            roots.append(section)
         stack.append(section)
+    for section in roots:
+        _set_page_range(section)
+    return roots
 
-    return root_sections
 
-
-def _get_level(section: Section) -> int:
-    """Get the numeric heading level, defaulting to 0 for untitled sections."""
-    if section.heading_level:
-        return section.heading_level.value
-    return 0
+def _set_page_range(section: Section) -> None:
+    pages = [block.page_number for block in section.blocks if block.page_number > 0]
+    if section.heading_paragraph and section.heading_paragraph.page_number > 0:
+        pages.append(section.heading_paragraph.page_number)
+    for child in section.subsections:
+        _set_page_range(child)
+        pages.extend(page for page in (child.page_number, child.page_end) if page > 0)
+    if pages:
+        section.page_number = min(pages)
+        section.page_end = max(pages)

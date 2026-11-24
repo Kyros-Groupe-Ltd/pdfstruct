@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from pdfstruct.models.document import (
-    Paragraph, ListItem, ListType, TextLine, BBox,
+    ListItem,
+    ListType,
+    Paragraph,
+    TextLine,
 )
 
 # Bullet markers
@@ -43,7 +45,7 @@ def detect_lists_in_paragraphs(paragraphs: list[Paragraph]) -> list[Paragraph]:
 
 def _extract_list_items(
     lines: list[TextLine],
-) -> Optional[list[tuple[ListItem, ListType]]]:
+) -> list[tuple[ListItem, ListType]] | None:
     """Try to parse lines as a list.
 
     Returns list of (ListItem, ListType) tuples if lines form a list,
@@ -53,13 +55,14 @@ def _extract_list_items(
         return None
 
     items: list[tuple[ListItem, ListType]] = []
+    anchor: TextLine | None = None
+    previous: TextLine | None = None
 
     for line in lines:
-        text = line.text.strip()
-        if not text:
+        if not line.text.strip():
             continue
 
-        result = _parse_list_line(text)
+        result = _parse_list_line(line.text)
         if result:
             marker, content, list_type, level = result
             items.append((
@@ -71,24 +74,41 @@ def _extract_list_items(
                 ),
                 list_type,
             ))
+            anchor = line
+        else:
+            # A paragraph can contain a preamble, an ordinary sentence between
+            # bullets, or an unindented continuation. Do not drop that content
+            # merely because two other lines happen to look like list items.
+            # Only fold an unambiguously indented, adjacent continuation into
+            # its item. Otherwise retain the complete original paragraph.
+            if anchor is None or previous is None:
+                return None
+            if (
+                line.is_heading
+                or line.page_number != anchor.page_number
+                or line.bbox.x0 - anchor.bbox.x0 < max(2.0, anchor.font.size * 0.4)
+                or line.bbox.y1 >= previous.bbox.y1
+                or abs(line.font.size - anchor.font.size) > anchor.font.size * 0.2
+            ):
+                return None
+            item = items[-1][0]
+            item.text += " " + line.text.strip()
+            item.bbox = item.bbox.merge(line.bbox) if item.bbox else line.bbox
+        previous = line
 
     # Require at least 2 items with the same type to be a list
     if len(items) < 2:
         return None
 
-    # Check that most items have the same list type
-    types = [lt for _, lt in items]
-    from collections import Counter
-    type_counts = Counter(types)
-    dominant_type, dominant_count = type_counts.most_common(1)[0]
-
-    if dominant_count < len(items) * 0.6:
+    # The output model has one list type per paragraph. Mixed marker families
+    # are ambiguous; preserve their original text rather than relabeling them.
+    if len({list_type for _, list_type in items}) != 1:
         return None
 
     return items
 
 
-def _parse_list_line(text: str) -> Optional[tuple[str, str, ListType, int]]:
+def _parse_list_line(text: str) -> tuple[str, str, ListType, int] | None:
     """Parse a single line as a potential list item.
 
     Returns (marker, content, list_type, indent_level) or None.
@@ -109,16 +129,16 @@ def _parse_list_line(text: str) -> Optional[tuple[str, str, ListType, int]]:
     # Numbered: "1. Item" or "1) Item"
     m = NUMBERED_LIST.match(text)
     if m:
-        return (m.group(1) + ".", m.group(2), ListType.NUMBERED, level)
+        return (text[:m.start(2)].strip(), m.group(2), ListType.NUMBERED, level)
 
     # Lettered: "a. Item" or "a) Item"
     m = LETTERED_LIST.match(text)
     if m:
-        return (m.group(1) + ".", m.group(2), ListType.LETTERED, level)
+        return (text[:m.start(2)].strip(), m.group(2), ListType.LETTERED, level)
 
     # Roman: "i. Item" or "ii) Item"
     m = ROMAN_LIST.match(text)
     if m:
-        return (m.group(1) + ".", m.group(2), ListType.ROMAN, level)
+        return (text[:m.start(2)].strip(), m.group(2), ListType.ROMAN, level)
 
     return None
